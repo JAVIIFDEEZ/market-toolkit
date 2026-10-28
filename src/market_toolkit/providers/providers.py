@@ -1,12 +1,49 @@
 import warnings
+import dataclasses
 from abc import ABC, abstractmethod
 from typing import Any
+from datetime import date
 
 import yfinance
 import pandas as pd
 
 from market_toolkit.exceptions import DataNotFoundException
 from market_toolkit.preprocessing import limpiar_datos
+
+
+@dataclasses.dataclass(frozen=True)
+class FinancialSeries:
+    serie_temporal: pd.Series
+    metadatos: dict
+
+    def __post_init__(self):
+        self.metadatos["inicio"] = self.serie_temporal.index.min().date()
+        self.metadatos["fin"] = self.serie_temporal.index.max().date()
+        self.metadatos["activo"] = self.serie_temporal.name
+
+    @property
+    def nombre(self) -> str:
+        return self.metadatos["nombre"]
+
+    @property
+    def activo(self) -> str:
+        return self.metadatos["activo"]
+
+    @property
+    def inicio(self) -> date:
+        return self.metadatos["inicio"]
+
+    @property
+    def fin(self) -> date:
+        return self.metadatos["fin"]
+
+    @property
+    def duracion(self):
+        return (self.fin - self.inicio).days
+
+    @property
+    def tipo(self) -> str:
+        return self.metadatos["tipo"]
 
 
 class Provider(ABC):
@@ -26,7 +63,7 @@ class Provider(ABC):
         return list(set(map(lambda s: s.upper(), tickers)))
 
     @abstractmethod
-    def download(self, *, inicio: Any = None, fin: Any = None, periodo: str | None = None, **opciones: dict[str, Any]) -> pd.DataFrame:
+    def download(self, *, inicio: Any = None, fin: Any = None, periodo: str | None = None, **opciones: Any) -> list[FinancialSeries]:
         """
         Descarga los datos financioneros durante el periodo especificado para los tickers configurados en este provedor.
         Si no se especifica ningún parámetro, se obtiene el histórico desde la fecha de cotización de los activos hasta el día actual.
@@ -61,7 +98,7 @@ class YahooFinanceProvider(Provider):
     def __init__(self, tickers: list[str]) -> None:
         """
         Initialize un objeto de proveedor de Yahoo Finance.
-        :param tickers: Los tickers de los que se quiere ibtener la información.
+        :param tickers: Los tickers de los que se quiere obtener la información.
         """
         super().__init__(tickers)
 
@@ -90,7 +127,7 @@ class YahooFinanceProvider(Provider):
             warnings.warn(f"Los tickers {', '.join(inexistentes)} no son equities o no existen en Yahoo Finance. Se eliminan de los datos de busqueda.", UserWarning, stacklevel=2)
         return validos
 
-    def download(self, *, inicio: str | None = None, fin: str | None = None, periodo: str | None = None, **opciones: Any) -> pd.DataFrame:
+    def download(self, *, inicio: str | None = None, fin: str | None = None, periodo: str | None = None, **opciones: Any) -> list[FinancialSeries]:
         """
         Descarga los datos financioneros durante el periodo especificado para los tickers configurados en este provedor.
         :param inicio: Fecha de inicio del histórico.
@@ -102,11 +139,16 @@ class YahooFinanceProvider(Provider):
             periodo = None
         datos = yfinance.download(self.tickers, start=inicio, end=fin, period=periodo)
         if datos is None or datos.empty:
-            raise DataNotFoundException(f"No se ha encontrado información para los tickers {self.tickers} en la base de datos de Yahoo Finance.")
+            raise DataNotFoundException(f"No se ha encontrado información para los tickers {", ".join(self.tickers)} en la base de datos de Yahoo Finance.")
 
         datos = datos["Close"] # Nos quedamos con los datos de cierre ajustados
         alineacion_temporal = opciones.get("alineacion_temporal", None)
-        return limpiar_datos(datos, alineacion_temporal)
+        datos_limpios = limpiar_datos(datos, alineacion_temporal)
+        series = []
+        for ticker in self.tickers:
+            series.append(FinancialSeries(datos_limpios[ticker], {"nombre": ticker, "proveedor": "Yahoo Finance", "tipo": "acción"}))
+        return series
+
 
     def __repr__(self) -> str:
-        return f"YahooFinanceProvider object tickers<{','.join(self.tickers)}>"
+        return f"YahooFinanceProvider object tickers<{', '.join(self.tickers)}>"
