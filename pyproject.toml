@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "market-toolkit"
-version = "0.1.3"
+version = "0.1.4"
 description = "Toolkit de extracción, análisis bursátil y gestión de carteras"
 readme = "README.md"
 requires-python = ">=3.11"
