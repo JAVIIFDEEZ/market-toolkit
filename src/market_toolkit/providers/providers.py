@@ -3,6 +3,10 @@ import dataclasses
 from abc import ABC, abstractmethod
 from typing import Any
 from datetime import date
+import getpass
+import time
+
+from massive import RESTClient
 
 import yfinance
 import pandas as pd
@@ -152,3 +156,135 @@ class YahooFinanceProvider(Provider):
 
     def __repr__(self) -> str:
         return f"YahooFinanceProvider object tickers<{', '.join(self.tickers)}>"
+
+
+class PolygonProvider(Provider):
+    """Proveedor para descargar datos financieros de Polygon.io del plan gratuito (ahora Massive)."""
+
+    # Periodos admitidos y sus días equivalentes
+    PERIODOS = {"1mo": 30, "3mo": 90, "6mo": 180, "1y": 365, "2y": 730}
+    DIAS_HISTORICO = 730  # El plan gratuito solo cubre 2 años
+
+    def __init__(self, tickers: list[str], pausa: int = 12) -> None:
+        """
+        Inicializa un objeto de proveedor de Polygon. Pide la API key por pantalla.
+        :param tickers: Los tickers de los que se quiere obtener la información.
+        :param pausa: Segundos de espera entre llamadas (plan gratuito: 5 llamadas/minuto).
+        """
+        api_key = getpass.getpass("Introduce tu API key de Polygon: ").strip()
+        if api_key == "":
+            raise ValueError("No se ha introducido ninguna API key.")
+        self.cliente = RESTClient(api_key)
+        self.pausa = pausa
+        super().__init__(tickers)
+
+    def _validar_input(self, tickers: list[str]) -> list[str]:
+        """
+        Comprueba que los tickers existen en Polygon y son acciones, y se queda únicamente con éstos.
+        :param tickers: Los tickers a comprobar.
+        :return: Una lista formada por los tickers válidos.
+        """
+        inexistentes = []
+        tickers = super()._validar_input(tickers)
+        validos = []
+        for i, ticker in enumerate(tickers):
+            if i > 0:
+                time.sleep(self.pausa)  # Esperar entre llamadas 
+            try:
+                tipologia = self.cliente.get_ticker_details(ticker).type
+            except Exception:
+                inexistentes.append(ticker)
+            else:
+                if tipologia == "CS":  # CS = Common Stock, el equivalente a "EQUITY" en Yahoo
+                    validos.append(ticker)
+                else:
+                    inexistentes.append(ticker)
+        if inexistentes:
+            warnings.warn(f"Los tickers {', '.join(inexistentes)} no son equities o no existen en Polygon. Se eliminan de los datos de busqueda.", UserWarning, stacklevel=2)
+        return validos
+
+    def _calcular_fechas(self, inicio: str | None, fin: str | None, periodo: str | None) -> tuple[str, str]:
+        """
+        Calcula las fechas de inicio y fin, ya que Polygon necesita siempre las dos.
+        Si la fecha de inicio es anterior a lo que cubre el plan, se recorta y se avisa.
+        :return: Tupla (inicio, fin) en formato 'YYYY-MM-DD'.
+        """
+        hoy = pd.Timestamp.today().normalize()
+
+        # Fecha de fin: la indicada o, por defecto, ayer (último día cerrado)
+        if fin is None:
+            fin = hoy - pd.Timedelta(days=1)
+        else:
+            fin = pd.Timestamp(fin)
+
+        # Fecha de inicio: la indicada o, si no, fin menos el periodo (por defecto 2 años)
+        if inicio is None:
+            if periodo is None:
+                periodo = "2y"
+            if periodo not in self.PERIODOS:
+                raise ValueError(f"Periodo '{periodo}' no válido. Usa uno de: {', '.join(self.PERIODOS)}.")
+            inicio = fin - pd.Timedelta(days=self.PERIODOS[periodo])
+        else:
+            inicio = pd.Timestamp(inicio)
+
+        # Comprobar el límite del plan gratuito (+1 día de margen)
+        limite = hoy - pd.Timedelta(days=self.DIAS_HISTORICO - 1)
+        if inicio < limite:
+            warnings.warn(f"El plan de Polygon solo cubre desde {limite.date()}. Se recorta la fecha de inicio {inicio.date()}.", UserWarning, stacklevel=3)
+            inicio = limite
+        if inicio > fin:
+            raise ValueError(f"El rango pedido termina el {fin.date()}, antes de lo que cubre el plan ({limite.date()}).")
+
+        return inicio.strftime("%Y-%m-%d"), fin.strftime("%Y-%m-%d")
+
+    def download(self, *, inicio: str | None = None, fin: str | None = None, periodo: str | None = None, **opciones: Any) -> list[FinancialSeries]:
+        """
+        Descarga los datos financieros durante el periodo especificado para los tickers configurados en este proveedor.
+        Si no se especifica ningún parámetro, se descargan los últimos 2 años (límite del plan gratuito).
+        :param inicio: Fecha de inicio del histórico.
+        :param fin: Fecha de fin del histórico.
+        :param periodo: Duración del histórico ("1mo", "3mo", "6mo", "1y", "2y"). Se ignora si se ha establecido una fecha de inicio.
+        :return: Lista de FinancialSeries con los precios de cierre ajustados de cada ticker.
+        """
+        desde, hasta = self._calcular_fechas(inicio, fin, periodo)
+
+        time.sleep(self.pausa) 
+        cierres_por_ticker = {}
+        errores = []
+        for i, ticker in enumerate(self.tickers):
+             
+            if i > 0:
+                time.sleep(self.pausa)
+            try:
+                aggs = self.cliente.list_aggs(ticker=ticker, multiplier=1, timespan="day", from_=desde, to=hasta, adjusted=True, limit=50000)
+                fechas = []
+                cierres = []
+                for agg in aggs:
+                    fechas.append(agg.timestamp)
+                    cierres.append(agg.close)
+            except Exception as e:
+                errores.append(f"{ticker} ({e})")
+                continue
+
+            if len(cierres) == 0:
+                errores.append(f"{ticker} (sin datos en el rango)")
+            else:
+                # normalize() deja solo la fecha, igual que el índice de Yahoo
+                indice = pd.to_datetime(fechas, unit="ms").normalize()
+                cierres_por_ticker[ticker] = pd.Series(cierres, index=indice, name=ticker)
+
+        if errores:
+            warnings.warn(f"No se han podido descargar: {', '.join(errores)}.", UserWarning, stacklevel=2)
+        if len(cierres_por_ticker) == 0:
+            raise DataNotFoundException(f"No se ha encontrado información para los tickers {', '.join(self.tickers)} en Polygon.")
+
+        datos = pd.DataFrame(cierres_por_ticker)
+        alineacion_temporal = opciones.get("alineacion_temporal", None)
+        datos_limpios = limpiar_datos(datos, alineacion_temporal)
+        series = []
+        for ticker in datos_limpios.columns:
+            series.append(FinancialSeries(datos_limpios[ticker], {"nombre": ticker, "proveedor": "Polygon", "tipo": "acción"}))
+        return series
+
+    def __repr__(self) -> str:
+        return f"Polygon object tickers<{', '.join(self.tickers)}>"
