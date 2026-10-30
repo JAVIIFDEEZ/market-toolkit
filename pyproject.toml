@@ -1,0 +1,38 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "market-toolkit"
+version = "0.1.0"
+description = "Toolkit de extracción, análisis bursátil y gestión de carteras"
+readme = "README.md"
+requires-python = ">=3.11"
+authors = [{ name = "Nombre 1" }, { name = "Nombre 2" }, { name = "Nombre 3" }]
+dependencies = [
+  "pandas>=2.0",
+  "numpy>=1.26",
+  "matplotlib>=3.8",
+  "yfinance",
+  "requests",          # Alpha Vantage vía REST, sin librería extra
+  "fredapi",
+  "python-dotenv",
+]
+
+[project.optional-dependencies]
+dev = ["pytest", "pytest-cov", "ruff"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra -m 'not network'"
+markers = ["network: tests que llaman a APIs reales"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]
