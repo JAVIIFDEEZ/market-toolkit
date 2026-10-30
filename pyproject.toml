@@ -17,6 +17,7 @@ dependencies = [
   "requests",          # Alpha Vantage vía REST, sin librería extra
   "fredapi",
   "python-dotenv",
+  "massive"
 ]
 
 [project.optional-dependencies]
