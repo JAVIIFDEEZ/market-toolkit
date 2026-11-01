@@ -3,6 +3,7 @@ from typing import Literal
 import numpy as np
 import pandas as pd
 
+
 def limpiar_datos(
     datos: pd.DataFrame | pd.Series,
     alineacion_temporal: Literal["relleno", "eliminacion"] | None = None

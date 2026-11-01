@@ -142,7 +142,8 @@ def test_insufficient_data_es_un_error_de_validacion():
 def test_macro_series_estadisticos_del_nivel():
     fechas = pd.date_range("2024-01-01", periods=12, freq="MS")
     tipos = pd.Series(np.linspace(-0.5, 5.0, 12), index=fechas, name="TIPO")
-    macro = MacroSeries(tipos, metadatos={"nombre": "Tipo de interés"}, unidad="%", proveedor="Sintético")
+    macro = MacroSeries(tipos, metadatos={"nombre": "Tipo de interés"}, unidad="%",
+                        proveedor="Sintético")
     assert macro.nombre == "Tipo de interés"
     assert macro.media == pytest.approx(tipos.mean())
     assert macro.desviacion_tipica == pytest.approx(tipos.std())

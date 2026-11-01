@@ -166,7 +166,7 @@ class YahooFinanceProvider(Provider):
         if len(tickers) == 0:
             raise DataNotFoundException(
                 f"No se ha encontrado ningún activo que coincida con los nombres introducidos: "
-                f"{", ".join(nombres)}"
+                f"{', '.join(nombres)}"
             )
         return cls(tickers)
 

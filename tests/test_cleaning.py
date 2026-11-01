@@ -1,7 +1,7 @@
 import numpy as np
 import pandas as pd
 
-from market_toolkit.preprocessing import limpiar_dataframe, limpiar_serie, limpiar_datos
+from market_toolkit.preprocessing import limpiar_dataframe, limpiar_datos, limpiar_serie
 
 
 def test_conserva_tipo(serie_precios, precios_sinteticos):

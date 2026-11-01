@@ -93,7 +93,8 @@ class FinancialSeries(SerieTemporal):
         rendimientos = self.rendimientos()
         media = float(rendimientos.mean())
         desviacion = float(rendimientos.std())
-        # Rentabilidad compuesta a partir de la rentabilidad diaria y volatilidad por la regla de la raíz
+        # Rentabilidad compuesta a partir de la rentabilidad diaria
+        # y volatilidad por la regla de la raíz
         rentabilidad_anual = (1 + media) ** DIAS_COTIZACION_ANUAL - 1
         volatilidad_anual = desviacion * np.sqrt(DIAS_COTIZACION_ANUAL)
         object.__setattr__(self, "rentabilidad_media", media)
