@@ -13,8 +13,8 @@ from market_toolkit.models import FinancialSeries, Fundamentales, MacroSeries, T
 def serie_financiera(serie_precios):
     return FinancialSeries(
         serie_precios,
-        {"nombre": "Acción AAA"},
-        tipo_activo=TipoActivo.ACCION,
+        TipoActivo.ACCION,
+        metadatos={"nombre": "Acción AAA"},
         moneda="USD",
         proveedor="Sintético",
     )
@@ -34,7 +34,7 @@ def test_properties(serie_financiera, serie_precios):
 
 
 def test_nombre_por_defecto_es_el_activo(serie_precios):
-    serie = FinancialSeries(serie_precios)
+    serie = FinancialSeries(serie_precios, TipoActivo.ACCION)
     assert serie.nombre == "AAA"
 
 
@@ -42,7 +42,7 @@ def test_estadisticos_automaticos(serie_financiera, serie_precios):
     rendimientos = serie_precios.pct_change().dropna()
     media = rendimientos.mean()
     desviacion = rendimientos.std()
-    assert serie_financiera.media == pytest.approx(media)
+    assert serie_financiera.rentabilidad_media == pytest.approx(media)
     assert serie_financiera.desviacion_tipica == pytest.approx(desviacion)
     assert serie_financiera.rentabilidad_anualizada == pytest.approx(
         (1 + media) ** DIAS_COTIZACION_ANUAL - 1
@@ -71,14 +71,14 @@ def test_resumen(serie_financiera):
 
 def test_es_inmutable_y_no_modifica_los_metadatos(serie_precios):
     metadatos = {"nombre": "AAA"}
-    serie = FinancialSeries(serie_precios, metadatos)
+    serie = FinancialSeries(serie_precios, TipoActivo.ACCION, metadatos)
     assert metadatos == {"nombre": "AAA"}
     with pytest.raises(dataclasses.FrozenInstanceError):
-        serie.media = 0.0
+        serie.rentabilidad_media = 0.0
 
 
 def test_copia_la_serie(serie_precios):
-    serie = FinancialSeries(serie_precios)
+    serie = FinancialSeries(serie_precios, TipoActivo.ACCION)
     original = serie.serie_temporal.iloc[0]
     serie_precios.iloc[0] = 1.0
     assert serie.serie_temporal.iloc[0] == original
@@ -94,18 +94,18 @@ def test_indice(serie_precios):
 
 def test_rechaza_indice_no_temporal(serie_precios):
     with pytest.raises(DataValidationError):
-        FinancialSeries(serie_precios.reset_index(drop=True))
+        FinancialSeries(serie_precios.reset_index(drop=True), TipoActivo.ACCION)
 
 
 def test_rechaza_fechas_duplicadas(serie_precios):
     duplicada = pd.concat([serie_precios, serie_precios.iloc[-1:]])
     with pytest.raises(DataValidationError):
-        FinancialSeries(duplicada)
+        FinancialSeries(duplicada, TipoActivo.ACCION)
 
 
 def test_rechaza_fechas_desordenadas(serie_precios):
     with pytest.raises(DataValidationError):
-        FinancialSeries(serie_precios.iloc[::-1])
+        FinancialSeries(serie_precios.iloc[::-1], TipoActivo.ACCION)
 
 
 @pytest.mark.parametrize("valor", [0.0, -1.0, np.nan, np.inf])
@@ -113,23 +113,23 @@ def test_rechaza_precios_no_validos(serie_precios, valor):
     serie = serie_precios.copy()
     serie.iloc[10] = valor
     with pytest.raises(DataValidationError):
-        FinancialSeries(serie)
+        FinancialSeries(serie, TipoActivo.ACCION)
 
 
 def test_rechaza_valores_no_numericos(serie_precios):
     texto = serie_precios.astype(str)
     with pytest.raises(DataValidationError):
-        FinancialSeries(texto)
+        FinancialSeries(texto, TipoActivo.ACCION)
 
 
 def test_rechaza_dataframe(precios_sinteticos):
     with pytest.raises(DataValidationError):
-        FinancialSeries(precios_sinteticos)
+        FinancialSeries(precios_sinteticos, TipoActivo.ACCION)
 
 
 def test_rechaza_series_cortas(serie_precios):
     with pytest.raises(InsufficientDataError):
-        FinancialSeries(serie_precios.iloc[: MIN_OBSERVACIONES - 1])
+        FinancialSeries(serie_precios.iloc[: MIN_OBSERVACIONES - 1], TipoActivo.ACCION)
 
 
 def test_insufficient_data_es_un_error_de_validacion():
@@ -142,7 +142,7 @@ def test_insufficient_data_es_un_error_de_validacion():
 def test_macro_series_estadisticos_del_nivel():
     fechas = pd.date_range("2024-01-01", periods=12, freq="MS")
     tipos = pd.Series(np.linspace(-0.5, 5.0, 12), index=fechas, name="TIPO")
-    macro = MacroSeries(tipos, {"nombre": "Tipo de interés"}, unidad="%", proveedor="Sintético")
+    macro = MacroSeries(tipos, metadatos={"nombre": "Tipo de interés"}, unidad="%", proveedor="Sintético")
     assert macro.nombre == "Tipo de interés"
     assert macro.media == pytest.approx(tipos.mean())
     assert macro.desviacion_tipica == pytest.approx(tipos.std())

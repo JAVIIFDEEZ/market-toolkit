@@ -1,53 +1,17 @@
 import warnings
-import dataclasses
 from abc import ABC, abstractmethod
-from typing import Any
-from datetime import date
+from typing import Any, Self
 
 import yfinance
-import pandas as pd
 
 from market_toolkit.exceptions import DataNotFoundException
-from market_toolkit.preprocessing import limpiar_datos
-
-
-@dataclasses.dataclass(frozen=True)
-class FinancialSeries:
-    serie_temporal: pd.Series
-    metadatos: dict
-
-    def __post_init__(self):
-        self.metadatos["inicio"] = self.serie_temporal.index.min().date()
-        self.metadatos["fin"] = self.serie_temporal.index.max().date()
-        self.metadatos["activo"] = self.serie_temporal.name
-
-    @property
-    def nombre(self) -> str:
-        return self.metadatos["nombre"]
-
-    @property
-    def activo(self) -> str:
-        return self.metadatos["activo"]
-
-    @property
-    def inicio(self) -> date:
-        return self.metadatos["inicio"]
-
-    @property
-    def fin(self) -> date:
-        return self.metadatos["fin"]
-
-    @property
-    def duracion(self):
-        return (self.fin - self.inicio).days
-
-    @property
-    def tipo(self) -> str:
-        return self.metadatos["tipo"]
+from market_toolkit.models import FinancialSeries, TipoActivo
+from market_toolkit.preprocessing import limpiar_serie
 
 
 class Provider(ABC):
     """Clase base abstracta para los provedores de información bursátil."""
+
     tickers: list[str]
 
     def __init__(self, tickers: list[str]) -> None:
@@ -63,15 +27,22 @@ class Provider(ABC):
         return list(set(map(lambda s: s.upper(), tickers)))
 
     @abstractmethod
-    def download(self, *, inicio: Any = None, fin: Any = None, periodo: str | None = None, **opciones: Any) -> list[FinancialSeries]:
+    def download(
+        self, *, inicio: Any = None, fin: Any = None, periodo: str | None = None, **opciones: Any
+    ) -> list[FinancialSeries]:
         """
-        Descarga los datos financioneros durante el periodo especificado para los tickers configurados en este provedor.
-        Si no se especifica ningún parámetro, se obtiene el histórico desde la fecha de cotización de los activos hasta el día actual.
+        Descarga los datos financieros durante el periodo especificado para los
+        tickers configurados en este proveedor.
+
+        Si no se especifica ningún parámetro, se obtiene el histórico desde la
+        fecha de cotización de los activos hasta el día actual.
+
         :param inicio: Fecha de inicio del histórico.
         :param fin: Fecha de fin del histórico.
-        :param periodo: Duración del histórico. Se ignora si se ha establecido una fecha de inicio y de fin.
+        :param periodo: Duración del histórico. Se ignora si se han establecido
+            una fecha de inicio y de fin.
         :param opciones: Opciones adicionales de descarga.
-        :return: Un dataframe con la información bursatil correspondiente.
+        :return: Una lista de objetos FinancialSeries.
         """
 
     def incorporar_tickers(self, tickers_nuevos: list[str]) -> None:
@@ -104,7 +75,8 @@ class YahooFinanceProvider(Provider):
 
     def _validar_input(self, tickers: list[str]) -> list[str]:
         """
-        Funcion que comprueba que los tickers de acciones e índices bursátiles son válidos y se queda únicamente con éstos.
+        Función que comprueba que los tickers de acciones e índices bursátiles
+        son válidos y conserva únicamente aquellos que lo son.
         :param tickers: Los tickers a comprobar.
         :return: Una lista formada por los tickers válidos.
         """
@@ -114,41 +86,89 @@ class YahooFinanceProvider(Provider):
         # Comprobar que los tickers son de acciones individuales
         for ticker in tickers:
             try:
-                tipologia = yfinance.Ticker(ticker).info['quoteType']
+                tipologia = yfinance.Ticker(ticker).get_fast_info()["quote_type"]
             except KeyError:
                 inexistentes.append(ticker)
             else:
                 if tipologia == "EQUITY":
                     validos.append(ticker)
+                elif tipologia == "INDEX":
+                    validos.append(ticker)
                 else:
                     inexistentes.append(ticker)
         # Si algún ticker no es válido, mostrar un warning por pantalla y eliminarlo
         if inexistentes:
-            warnings.warn(f"Los tickers {', '.join(inexistentes)} no son equities o no existen en Yahoo Finance. Se eliminan de los datos de busqueda.", UserWarning, stacklevel=2)
+            tickers_str = ", ".join(inexistentes)
+            warnings.warn(
+                f"Los tickers {tickers_str} no son equities o no existen en Yahoo Finance."
+                f"Se eliminan de los datos de busqueda.",
+                UserWarning,
+                stacklevel=2,
+            )
         return validos
 
-    def download(self, *, inicio: str | None = None, fin: str | None = None, periodo: str | None = None, **opciones: Any) -> list[FinancialSeries]:
+    def download(
+        self, *, inicio: Any = None, fin: Any = None, periodo: str | None = None, **opciones: Any
+    ) -> list[FinancialSeries]:
         """
-        Descarga los datos financioneros durante el periodo especificado para los tickers configurados en este provedor.
+        Descarga los datos financioneros durante el periodo especificado para los tickers
+        configurados en este provedor.
         :param inicio: Fecha de inicio del histórico.
         :param fin: Fecha de fin del histórico.
-        :param periodo: Duración del histórico. Se ignora si se ha establecido una fecha de inicio y de fin.
-        :return: Dataframe con los datos de cierre ajustados para cada uno de los tickers configurados en este proveedor.
+        :param periodo: Duración del histórico.
+        Se ignora si se ha establecido una fecha de inicio y de fin.
+        :param opciones: Opciones de limpieza de datos (por ejemplo, alineacion_temporal)
+        :return: Dataframe con los datos de cierre ajustados para cada uno de los tickers
+        configurados en este proveedor.
         """
         if inicio is not None and fin is not None:
             periodo = None
-        datos = yfinance.download(self.tickers, start=inicio, end=fin, period=periodo)
-        if datos is None or datos.empty:
-            raise DataNotFoundException(f"No se ha encontrado información para los tickers {", ".join(self.tickers)} en la base de datos de Yahoo Finance.")
-
-        datos = datos["Close"] # Nos quedamos con los datos de cierre ajustados
-        alineacion_temporal = opciones.get("alineacion_temporal", None)
-        datos_limpios = limpiar_datos(datos, alineacion_temporal)
+        if not (inicio or fin or periodo):
+            periodo = "max"
         series = []
         for ticker in self.tickers:
-            series.append(FinancialSeries(datos_limpios[ticker], {"nombre": ticker, "proveedor": "Yahoo Finance", "tipo": "acción"}))
+            yf_ticker = yfinance.Ticker(ticker)
+            datos = yf_ticker.history(start=inicio, end=fin, period=periodo, auto_adjust=True)
+            info = yf_ticker.get_info()
+            datos = datos["Close"].rename(ticker)  # Nos quedamos con los datos de cierre ajustados
+            datos_limpios = limpiar_serie(datos)
+            series.append(
+                FinancialSeries(
+                    datos_limpios,
+                    TipoActivo.INDICE if info["quoteType"] == "INDEX" else TipoActivo.ACCION,
+                    proveedor = "Yahoo Finance",
+                    moneda = info.get("currency"),
+                    bolsa = info.get("fullExchangeName"),
+                    metadatos = {"nombre": info.get("longName") or info.get("shortName")}
+                )
+            )
         return series
 
+    @classmethod
+    def desde_nombres(cls, nombres: list[str]) -> Self:
+        tickers = []
+        for nombre in nombres:
+            candidatos = yfinance.Search(nombre).quotes
+            try:
+                elegido = next(candidato["symbol"]
+                               for candidato in candidatos
+                               if candidato["quoteType"] == "INDEX"
+                               or candidato["quoteType"] == "EQUITY")
+            except StopIteration:
+                warnings.warn(
+                    f'No se ha encontrado ningún activo con el nombre "{nombre}".',
+                            UserWarning,
+                            stacklevel=2
+                )
+            else:
+                tickers.append(elegido)
+
+        if len(tickers) == 0:
+            raise DataNotFoundException(
+                f"No se ha encontrado ningún activo que coincida con los nombres introducidos: "
+                f"{", ".join(nombres)}"
+            )
+        return cls(tickers)
 
     def __repr__(self) -> str:
         return f"YahooFinanceProvider object tickers<{', '.join(self.tickers)}>"

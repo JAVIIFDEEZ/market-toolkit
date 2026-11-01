@@ -27,7 +27,7 @@ class SerieTemporal:
     """
 
     serie_temporal: pd.Series = field(repr=False)
-    metadatos: dict = field(default_factory=dict, repr=False)
+    metadatos: dict = field(default_factory=dict, repr=False, kw_only=True)
 
     def __post_init__(self) -> None:
         # Se guardan copias para que los cambios externos no afecten al objeto
@@ -73,13 +73,15 @@ class FinancialSeries(SerieTemporal):
     :param metadatos: Información adicional de la serie (por ejemplo, su nombre).
     :param tipo_activo: Si la serie es de una acción o de un índice.
     :param moneda: Moneda en la que cotiza el activo.
+    :param bolsa: Bolsa de valores en la que se negocia el activo.
     :param proveedor: Fuente de la que se han obtenido los datos.
     """
 
-    tipo_activo: TipoActivo = TipoActivo.ACCION
+    tipo_activo: TipoActivo
     moneda: str | None = None
+    bolsa: str | None = None
     proveedor: str | None = None
-    media: float = field(init=False)
+    rentabilidad_media: float = field(init=False)
     desviacion_tipica: float = field(init=False)
     rentabilidad_anualizada: float = field(init=False)
     volatilidad_anualizada: float = field(init=False)
@@ -91,10 +93,10 @@ class FinancialSeries(SerieTemporal):
         rendimientos = self.rendimientos()
         media = float(rendimientos.mean())
         desviacion = float(rendimientos.std())
-        # Rentabilidad compuesta a partir de la media diaria y volatilidad por la regla de la raíz
+        # Rentabilidad compuesta a partir de la rentabilidad diaria y volatilidad por la regla de la raíz
         rentabilidad_anual = (1 + media) ** DIAS_COTIZACION_ANUAL - 1
         volatilidad_anual = desviacion * np.sqrt(DIAS_COTIZACION_ANUAL)
-        object.__setattr__(self, "media", media)
+        object.__setattr__(self, "rentabilidad_media", media)
         object.__setattr__(self, "desviacion_tipica", desviacion)
         object.__setattr__(self, "rentabilidad_anualizada", rentabilidad_anual)
         object.__setattr__(self, "volatilidad_anualizada", float(volatilidad_anual))
@@ -132,11 +134,12 @@ class FinancialSeries(SerieTemporal):
             "activo": self.activo,
             "tipo": self.tipo,
             "moneda": self.moneda,
+            "bolsa": self.bolsa,
             "proveedor": self.proveedor,
             "inicio": self.inicio,
             "fin": self.fin,
             "observaciones": self.observaciones,
-            "media_diaria": self.media,
+            "media_diaria": self.rentabilidad_media,
             "desviacion_tipica_diaria": self.desviacion_tipica,
             "rentabilidad_anualizada": self.rentabilidad_anualizada,
             "volatilidad_anualizada": self.volatilidad_anualizada,
