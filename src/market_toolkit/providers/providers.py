@@ -1,4 +1,6 @@
 import getpass
+import json
+import re
 import time
 import warnings
 from abc import ABC, abstractmethod
@@ -6,11 +8,38 @@ from typing import Any, Self
 
 import pandas as pd
 import yfinance
+from fredapi import Fred
 from massive import RESTClient
+from massive.exceptions import BadResponse
+from urllib3.exceptions import MaxRetryError
 
-from market_toolkit.exceptions import DataNotFoundException
-from market_toolkit.models import FinancialSeries, TipoActivo
+from market_toolkit import config
+from market_toolkit.exceptions import (
+    DataNotFoundException,
+    DataValidationError,
+    ProviderError,
+    RateLimitError,
+)
+from market_toolkit.models import FinancialSeries, MacroSeries, TipoActivo
 from market_toolkit.preprocessing import limpiar_serie
+
+
+def _resolver_api_key(api_key: str | None, api_key_config: str | None, proveedor: str) -> str:
+    """
+    Obtiene la API key de un proveedor: la indicada o, si no, la del fichero `.env` y, si
+    tampoco está, la pide por pantalla.
+    :param api_key: API key indicada por el usuario.
+    :param api_key_config: API key cargada en `config` desde el `.env`.
+    :param proveedor: Nombre del proveedor, para el mensaje por pantalla.
+    :return: La API key sin espacios.
+    """
+    api_key = api_key or api_key_config
+    if not api_key:
+        api_key = getpass.getpass(f"Introduce tu API key de {proveedor}: ")
+    api_key = api_key.strip()
+    if api_key == "":
+        raise ValueError("No se ha introducido ninguna API key.")
+    return api_key
 
 
 class Provider(ABC):
@@ -183,20 +212,20 @@ class PolygonProvider(Provider):
     Proveedor para descargar datos financieros de Polygon.io del plan gratuito (ahora Massive).
     """
 
-    # Periodos admitidos y sus días equivalentes
-    PERIODOS = {"1mo": 30, "3mo": 90, "6mo": 180, "1y": 365, "2y": 730}
+    # Periodos admitidos y sus días equivalentes. No hay "1mo" porque ~21 sesiones no llegan
+    # al mínimo de observaciones de FinancialSeries (MIN_OBSERVACIONES)
+    PERIODOS = {"3mo": 90, "6mo": 180, "1y": 365, "2y": 730}
     DIAS_HISTORICO = 730  # El plan gratuito solo cubre 2 años
 
-    def __init__(self, tickers: list[str], pausa: int = 12) -> None:
+    def __init__(self, tickers: list[str], pausa: int = 12, api_key: str | None = None) -> None:
         """
-        Inicializa un objeto de proveedor de Polygon. Pide la API key por pantalla.
+        Inicializa un objeto de proveedor de Polygon.
         :param tickers: Los tickers de los que se quiere obtener la información.
         :param pausa: Segundos de espera entre llamadas (plan gratuito: 5 llamadas/minuto).
+        :param api_key: API key de Polygon. Si no se indica, se usa `POLYGON_API_KEY` del
+            fichero `.env` y, si tampoco está, se pide por pantalla.
         """
-        api_key = getpass.getpass("Introduce tu API key de Polygon: ").strip()
-        if api_key == "":
-            raise ValueError("No se ha introducido ninguna API key.")
-        self.cliente = RESTClient(api_key)
+        self.cliente = RESTClient(_resolver_api_key(api_key, config.POLYGON_API_KEY, "Polygon"))
         self.pausa = pausa
         super().__init__(tickers)
 
@@ -215,8 +244,14 @@ class PolygonProvider(Provider):
                 time.sleep(self.pausa)  # Esperar entre llamadas
             try:
                 tipologia = self.cliente.get_ticker_details(ticker).type
-            except Exception:
+            except BadResponse as e:
+                # Solo NOT_FOUND significa que el ticker no existe. Con una API key no válida
+                # fallarían todos los tickers y no se debe confundir con que no existan
+                if self._respuesta_error(e).get("status") != "NOT_FOUND":
+                    raise self._error_proveedor(e) from e
                 inexistentes.append(ticker)
+            except MaxRetryError as e:  # Reintentos agotados (límite de llamadas o servidor)
+                raise self._error_proveedor(e) from e
             else:
                 if tipologia == "CS":  # CS = Common Stock, el equivalente a "EQUITY" en Yahoo
                     validos.append(ticker)
@@ -229,6 +264,40 @@ class PolygonProvider(Provider):
                 UserWarning, stacklevel=2)
         return validos
 
+    @staticmethod
+    def _respuesta_error(error: BadResponse) -> dict:
+        """
+        Lee el JSON que devuelve Polygon en una respuesta de error.
+        :return: Diccionario con la respuesta (`status`, `error`, `message`...) o vacío si no es
+            un JSON.
+        """
+        try:
+            respuesta = json.loads(str(error))
+        except ValueError:
+            return {}
+        return respuesta if isinstance(respuesta, dict) else {}
+
+    def _error_proveedor(self, error: Exception) -> ProviderError:
+        """
+        Traduce un error de Polygon a una excepción del paquete.
+        :param error: El error lanzado por el cliente de Polygon.
+        :return: `RateLimitError` si se ha superado el límite de llamadas, o `ProviderError`.
+        """
+        if isinstance(error, BadResponse):
+            respuesta = self._respuesta_error(error)
+            mensaje = respuesta.get("error") or respuesta.get("message") or str(error)
+        else:
+            mensaje = str(error)
+        # 429 en los reintentos agotados de urllib3 o el mensaje de Polygon: "You've exceeded
+        # the maximum requests per minute..."
+        if "429" in mensaje or "maximum requests" in mensaje.lower():
+            return RateLimitError(
+                f"Se ha superado el límite de llamadas de Polygon (plan gratuito: 5/minuto). "
+                f"Prueba a aumentar `pausa` (ahora {self.pausa} s). Detalle: {mensaje}")
+        if "api key" in mensaje.lower():
+            return ProviderError(f"Polygon ha rechazado la API key: {mensaje}")
+        return ProviderError(f"Error de Polygon: {mensaje}")
+
     def _calcular_fechas(self, inicio: str | None, fin: str | None, periodo: str | None) -> tuple[
         str, str]:
         """
@@ -237,6 +306,7 @@ class PolygonProvider(Provider):
         :return: Tupla (inicio, fin) en formato 'YYYY-MM-DD'.
         """
         hoy = pd.Timestamp.today().normalize()
+        inicio_usuario = inicio
 
         # Fecha de fin: la indicada o, por defecto, ayer (último día cerrado)
         if fin is None:
@@ -255,13 +325,15 @@ class PolygonProvider(Provider):
         else:
             inicio = pd.Timestamp(inicio)
 
-        # Comprobar el límite del plan gratuito (+1 día de margen)
+        # Comprobar el límite del plan gratuito (+1 día de margen). Solo se avisa si la fecha de
+        # inicio la ha indicado el usuario; si sale de un periodo ("2y") se ajusta sin avisar
         limite = hoy - pd.Timedelta(days=self.DIAS_HISTORICO - 1)
         if inicio < limite:
-            warnings.warn(
-                f"El plan de Polygon solo cubre desde {limite.date()}. "
-                f"Se recorta la fecha de inicio {inicio.date()}.",
-                UserWarning, stacklevel=3)
+            if inicio_usuario is not None:
+                warnings.warn(
+                    f"El plan de Polygon solo cubre desde {limite.date()}. "
+                    f"Se recorta la fecha de inicio {inicio.date()}.",
+                    UserWarning, stacklevel=3)
             inicio = limite
         if inicio > fin:
             raise ValueError(
@@ -278,7 +350,7 @@ class PolygonProvider(Provider):
         últimos 2 años (límite del plan gratuito).
         :param inicio: Fecha de inicio del histórico.
         :param fin: Fecha de fin del histórico.
-        :param periodo: Duración del histórico ("1mo", "3mo", "6mo", "1y", "2y").
+        :param periodo: Duración del histórico ("3mo", "6mo", "1y", "2y").
         Se ignora si se ha establecido una fecha de inicio.
         :return: Lista de FinancialSeries con los precios de cierre ajustados de cada ticker.
         """
@@ -310,26 +382,230 @@ class PolygonProvider(Provider):
                 indice = pd.to_datetime(fechas, unit="ms").normalize()
                 cierres_por_ticker[ticker] = pd.Series(cierres, index=indice, name=ticker)
 
-        if errores:
-            warnings.warn(f"No se han podido descargar: {', '.join(errores)}.", UserWarning,
-                          stacklevel=2)
-        if len(cierres_por_ticker) == 0:
-            tickers = ', '.join(self.tickers)
-            raise DataNotFoundException(
-                f"No se ha encontrado información para los tickers {tickers} en Polygon.")
-
         series = []
         for ticker, datos in cierres_por_ticker.items():
             datos_limpios = limpiar_serie(datos)
-            series.append(
-                FinancialSeries(
-                    datos_limpios[ticker],
-                    TipoActivo.ACCION,
-                    proveedor= "Polygon",
-                    metadatos = {"nombre": ticker}
-                )
-            )
+            try:
+                series.append(
+                    FinancialSeries(datos_limpios, TipoActivo.ACCION, proveedor="Polygon",
+                                    metadatos={"nombre": ticker}))
+            except DataValidationError as e:  # Incluye InsufficientDataError (rangos cortos)
+                errores.append(f"{ticker} ({e})")
+
+        if errores:
+            warnings.warn(f"No se han podido descargar: {', '.join(errores)}.", UserWarning,
+                          stacklevel=2)
+        if len(series) == 0:
+            tickers = ', '.join(self.tickers)
+            raise DataNotFoundException(
+                f"No se ha encontrado información válida para los tickers {tickers} en Polygon.")
         return series
 
     def __repr__(self) -> str:
         return f"Polygon object tickers<{', '.join(self.tickers)}>"
+
+
+class MacroProvider(Provider):
+    """
+    Proveedor para descargar series macroeconómicas de FRED. Con la opción `vintage` descarga
+    los datos tal y como se publicaron en el pasado (ALFRED), sin las revisiones posteriores.
+    Los "tickers" son los IDs de las series de FRED (por ejemplo "DGS10") o sus alias en `SERIES`.
+    """
+
+    # Alias de series habituales. También se puede usar cualquier ID de FRED directamente
+    SERIES = {
+        "us10y": "DGS10",  # Bono EE.UU. 10 años, % diario
+        "us2y": "DGS2",  # Bono EE.UU. 2 años, % diario
+        "us10y_2y": "T10Y2Y",  # Spread 10Y-2Y EE.UU., p.p. diario
+        "ipc_eurozona": "CP0000EZ19M086NEST",  # HICP Eurozona, índice 2015=100 mensual
+        "pib_espana": "CLVMNACSCAB1GQES",  # PIB real España, M€ encadenados trimestral
+        "es10y": "IRLTLT01ESM156N",  # Bono España 10 años, % mensual
+        "de10y": "IRLTLT01DEM156N",  # Bund 10 años, % mensual
+        "bce_depo": "ECBDFR",  # Facilidad de depósito del BCE, %
+        "fed_funds": "DFF",  # Fed Funds efectivo, % diario
+        "cpi_eeuu": "CPIAUCSL",  # IPC EE.UU., índice mensual
+        "pib_eeuu": "GDPC1",  # PIB real EE.UU., trimestral
+        "paro_eeuu": "UNRATE",  # Tasa de paro EE.UU., %
+        "eurusd": "DEXUSEU",  # Dólares por euro, diario
+        "vix": "VIXCLS",  # Índice de volatilidad VIX, diario
+        "hy_spread": "BAMLH0A0HYM2",  # Spread High Yield EE.UU., %
+        "wti": "DCOILWTICO",  # Petróleo WTI, $/barril
+        "breakeven10y": "T10YIE",  # Inflación implícita a 10 años EE.UU., %
+    }
+    # Frecuencias y métodos de agregación que admite la API de FRED
+    FRECUENCIAS = ("d", "w", "bw", "m", "q", "sa", "a")
+    AGREGACIONES = ("avg", "sum", "eop")
+
+    def __init__(self, tickers: list[str], api_key: str | None = None) -> None:
+        """
+        Inicializa un objeto de proveedor de FRED.
+        :param tickers: IDs de FRED o alias de `SERIES` de las series que se quieren obtener.
+        :param api_key: API key de FRED. Si no se indica, se usa `FRED_API_KEY` del
+            fichero `.env` y, si tampoco está, se pide por pantalla.
+        """
+        self.cliente = Fred(api_key=_resolver_api_key(api_key, config.FRED_API_KEY, "FRED"))
+        self.info: dict[str, pd.Series] = {}  # Metadatos de FRED de cada serie validada
+        super().__init__(tickers)
+
+    def _validar_input(self, tickers: list[str]) -> list[str]:
+        """
+        Traduce los alias a IDs de FRED, comprueba que las series existen y guarda sus metadatos.
+        :param tickers: IDs de FRED o alias de las series a comprobar.
+        :return: Una lista formada por los IDs de las series válidas.
+        """
+        inexistentes = []
+        tickers = super()._validar_input([self.SERIES.get(t.lower(), t) for t in tickers])
+        validos = []
+        for ticker in tickers:
+            try:
+                self.info[ticker] = self.cliente.get_series_info(ticker)
+            except ValueError as e:
+                # Con una API key no válida fallarían todas las series: no es que no existan
+                if "api_key" in str(e).lower():
+                    raise ProviderError(f"FRED ha rechazado la API key: {e}") from e
+                inexistentes.append(ticker)
+            else:
+                validos.append(ticker)
+        if inexistentes:
+            warnings.warn(
+                f"Las series {', '.join(inexistentes)} no existen en FRED. "
+                f"Se eliminan de los datos de busqueda.",
+                UserWarning, stacklevel=2)
+        return validos
+
+    @staticmethod
+    def _calcular_fechas(inicio: Any, fin: Any, periodo: str | None) -> tuple[
+        pd.Timestamp | None, pd.Timestamp | None]:
+        """
+        Calcula las fechas de inicio y fin. `None` significa sin límite (todo el histórico).
+        :param periodo: Duración del histórico: "max" o un número seguido de "mo" o "y"
+            (por ejemplo "6mo", "5y"). Se ignora si se ha establecido una fecha de inicio.
+        :return: Tupla (inicio, fin).
+        """
+        fin = None if fin is None else pd.Timestamp(fin)
+        if inicio is not None:
+            return pd.Timestamp(inicio), fin
+        if periodo is None or periodo == "max":
+            return None, fin
+        coincidencia = re.fullmatch(r"(\d+)(mo|y)", periodo)
+        if coincidencia is None:
+            raise ValueError(
+                f"Periodo '{periodo}' no válido. Usa 'max' o, por ejemplo, '6mo' o '5y'.")
+        cantidad, unidad = int(coincidencia[1]), coincidencia[2]
+        desplazamiento = pd.DateOffset(months=cantidad) if unidad == "mo" \
+            else pd.DateOffset(years=cantidad)
+        referencia = fin if fin is not None else pd.Timestamp.today().normalize()
+        return referencia - desplazamiento, fin
+
+    def _parametros_frecuencia(self, frecuencia: str | None, agregacion: str | None,
+                               vintage: str | None) -> dict[str, str]:
+        """
+        Comprueba las opciones de frecuencia y las traduce a los parámetros de la API de FRED.
+        :return: Diccionario con los parámetros `frequency` y `aggregation_method`.
+        """
+        parametros = {}
+        if frecuencia is not None:
+            if frecuencia not in self.FRECUENCIAS:
+                raise ValueError(
+                    f"Frecuencia '{frecuencia}' no válida. Usa una de: "
+                    f"{', '.join(self.FRECUENCIAS)}.")
+            if vintage == "first":
+                raise ValueError("No se puede cambiar la frecuencia con vintage='first'.")
+            parametros["frequency"] = frecuencia
+        if agregacion is not None:
+            if frecuencia is None:
+                raise ValueError("La opción 'agregacion' necesita indicar una 'frecuencia'.")
+            if agregacion not in self.AGREGACIONES:
+                raise ValueError(
+                    f"Agregación '{agregacion}' no válida. Usa una de: "
+                    f"{', '.join(self.AGREGACIONES)}.")
+            parametros["aggregation_method"] = agregacion
+        return parametros
+
+    def _descargar_serie(self, ticker: str, desde: pd.Timestamp | None,
+                         hasta: pd.Timestamp | None, vintage: str | None,
+                         parametros: dict[str, str]) -> pd.Series:
+        """
+        Descarga una serie de FRED o, si se indica un vintage, de ALFRED.
+        :return: Serie sin limpiar con los valores de cada fecha.
+        """
+        if vintage is None:
+            return self.cliente.get_series(ticker, desde, hasta, **parametros)
+        if vintage == "first":
+            # Primera publicación de cada dato. FRED no permite filtrar fechas, se hace aquí
+            serie = self.cliente.get_series_first_release(ticker)
+            serie.index = pd.to_datetime(serie.index)
+            return pd.to_numeric(serie, errors="coerce").loc[desde:hasta]
+        # Datos tal y como se conocían en la fecha indicada
+        fecha = pd.Timestamp(vintage).strftime("%Y-%m-%d")
+        return self.cliente.get_series(ticker, desde, hasta, realtime_start=fecha,
+                                       realtime_end=fecha, **parametros)
+
+    def download(self, *, inicio: Any = None, fin: Any = None, periodo: str | None = None,
+                 **opciones: Any) -> list[MacroSeries]:
+        """
+        Descarga las series macroeconómicas configuradas en este proveedor durante el periodo
+        especificado. Si no se especifica ningún parámetro, se descarga todo el histórico.
+        :param inicio: Fecha de inicio del histórico.
+        :param fin: Fecha de fin del histórico.
+        :param periodo: Duración del histórico: "max" o, por ejemplo, "6mo" o "5y".
+        Se ignora si se ha establecido una fecha de inicio.
+        :param opciones: Opciones de descarga:
+            - `vintage`: `None` para los últimos datos publicados, `"first"` para la primera
+              publicación de cada dato o una fecha para los datos tal y como se conocían ese
+              día. Usa ALFRED.
+            - `frecuencia`: agrega la serie en FRED a una frecuencia menor
+              ("d", "w", "bw", "m", "q", "sa", "a").
+            - `agregacion`: cómo agregar al cambiar la frecuencia: "avg" (media, por defecto
+              en FRED), "sum" (suma) o "eop" (último valor del periodo).
+        :return: Lista de MacroSeries con los valores de cada serie.
+        """
+        vintage = opciones.pop("vintage", None)
+        frecuencia = opciones.pop("frecuencia", None)
+        agregacion = opciones.pop("agregacion", None)
+        if opciones:
+            raise ValueError(f"Opciones no válidas: {', '.join(opciones)}.")
+        parametros = self._parametros_frecuencia(frecuencia, agregacion, vintage)
+        desde, hasta = self._calcular_fechas(inicio, fin, periodo)
+
+        series = []
+        errores = []
+        for ticker in self.tickers:
+            try:
+                datos = self._descargar_serie(ticker, desde, hasta, vintage, parametros)
+                if ticker not in self.info:  # Series añadidas con incorporar_tickers
+                    self.info[ticker] = self.cliente.get_series_info(ticker)
+                info = self.info[ticker]
+                # Los valores negativos son válidos en macro (tipos de interés, spreads...)
+                datos_limpios = limpiar_serie(datos.rename(ticker), permitir_negativos=True)
+                series.append(
+                    MacroSeries(
+                        datos_limpios,
+                        unidad=info.get("units_short"),
+                        proveedor="FRED" if vintage is None else "ALFRED",
+                        metadatos={
+                            "nombre": info.get("title", ticker),
+                            "frecuencia": info.get("frequency"),
+                            "ajuste_estacional": info.get("seasonal_adjustment_short"),
+                            "ultima_actualizacion": info.get("last_updated"),
+                            "vintage": vintage,
+                        }
+                    )
+                )
+            except (ValueError, DataValidationError) as e:
+                errores.append(f"{ticker} ({e})")
+
+        if errores:
+            warnings.warn(f"No se han podido descargar: {', '.join(errores)}.", UserWarning,
+                          stacklevel=2)
+        if len(series) == 0:
+            tickers = ', '.join(self.tickers)
+            raise DataNotFoundException(
+                f"No se ha encontrado información válida para las series {tickers} en FRED.")
+        return series
+
+    def __repr__(self) -> str:
+        return f"MacroProvider object series<{', '.join(self.tickers)}>"
+
+
+    
