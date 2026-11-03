@@ -96,6 +96,16 @@ rentabilidad_anualizada    0.2886823205407585
 volatilidad_anualizada     0.28720893275914944
 ```
 
+Los estadísticos son de los **rendimientos diarios** (`precio_hoy / precio_ayer - 1`), no del
+precio, y están en tanto por uno:
+
+| Campo | Ejemplo | Significado |
+|---|---|---|
+| `media_diaria` | 0,10 % | Rendimiento medio por sesión |
+| `desviacion_tipica_diaria` | 1,81 % | Volatilidad diaria |
+| `rentabilidad_anualizada` | 28,9 % | `(1 + media_diaria)^252 - 1` |
+| `volatilidad_anualizada` | 28,7 % | `desviacion_tipica_diaria × √252` |
+
 ```python
 aapl.serie_temporal.tail(3)        # pd.Series con los precios
 aapl.rendimientos().tail(3)        # Rendimientos simples
