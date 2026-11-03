@@ -216,6 +216,15 @@ class PolygonProvider(Provider):
     # al mínimo de observaciones de FinancialSeries (MIN_OBSERVACIONES)
     PERIODOS = {"3mo": 90, "6mo": 180, "1y": 365, "2y": 730}
     DIAS_HISTORICO = 730  # El plan gratuito solo cubre 2 años
+    # Nombres de las bolsas a partir del código MIC que devuelve Polygon en `primary_exchange`
+    BOLSAS = {
+        "XNAS": "NASDAQ",
+        "XNYS": "NYSE",
+        "XASE": "NYSE American",
+        "ARCX": "NYSE Arca",
+        "BATS": "Cboe BZX",
+        "IEXG": "IEX",
+    }
 
     def __init__(self, tickers: list[str], pausa: int = 12, api_key: str | None = None) -> None:
         """
@@ -227,6 +236,7 @@ class PolygonProvider(Provider):
         """
         self.cliente = RESTClient(_resolver_api_key(api_key, config.POLYGON_API_KEY, "Polygon"))
         self.pausa = pausa
+        self.info: dict[str, Any] = {}  # Detalles de Polygon de cada ticker validado
         super().__init__(tickers)
 
     def _validar_input(self, tickers: list[str]) -> list[str]:
@@ -243,7 +253,7 @@ class PolygonProvider(Provider):
             if i > 0:
                 time.sleep(self.pausa)  # Esperar entre llamadas
             try:
-                tipologia = self.cliente.get_ticker_details(ticker).type
+                detalles = self.cliente.get_ticker_details(ticker)
             except BadResponse as e:
                 # Solo NOT_FOUND significa que el ticker no existe. Con una API key no válida
                 # fallarían todos los tickers y no se debe confundir con que no existan
@@ -253,8 +263,9 @@ class PolygonProvider(Provider):
             except MaxRetryError as e:  # Reintentos agotados (límite de llamadas o servidor)
                 raise self._error_proveedor(e) from e
             else:
-                if tipologia == "CS":  # CS = Common Stock, el equivalente a "EQUITY" en Yahoo
+                if detalles.type == "CS":  # CS = Common Stock, el equivalente a "EQUITY" en Yahoo
                     validos.append(ticker)
+                    self.info[ticker] = detalles  # Se reutilizan en download() sin otra llamada
                 else:
                     inexistentes.append(ticker)
         if inexistentes:
@@ -263,6 +274,24 @@ class PolygonProvider(Provider):
                 f"en Polygon. Se eliminan de los datos de busqueda.",
                 UserWarning, stacklevel=2)
         return validos
+
+    def _metadatos(self, ticker: str) -> dict[str, str | None]:
+        """
+        Obtiene la moneda, la bolsa y el nombre del activo a partir de sus detalles en Polygon.
+        Si el ticker se añadió con `incorporar_tickers`, se piden los detalles en ese momento.
+        :param ticker: El ticker del activo.
+        :return: Diccionario con `moneda`, `bolsa` y `nombre`.
+        """
+        if ticker not in self.info:
+            time.sleep(self.pausa)
+            self.info[ticker] = self.cliente.get_ticker_details(ticker)
+        detalles = self.info[ticker]
+        moneda = detalles.currency_name.upper() if detalles.currency_name else None
+        # Polygon da la bolsa principal de cotización. Si no la indica, el activo cotiza en
+        # varias sin una principal
+        mic = detalles.primary_exchange
+        bolsa = self.BOLSAS.get(mic, mic) if mic else "Desconocido"
+        return {"moneda": moneda, "bolsa": bolsa, "nombre": detalles.name or ticker}
 
     @staticmethod
     def _respuesta_error(error: BadResponse) -> dict:
@@ -386,10 +415,18 @@ class PolygonProvider(Provider):
         for ticker, datos in cierres_por_ticker.items():
             datos_limpios = limpiar_serie(datos)
             try:
+                metadatos = self._metadatos(ticker)
                 series.append(
-                    FinancialSeries(datos_limpios, TipoActivo.ACCION, proveedor="Polygon",
-                                    metadatos={"nombre": ticker}))
-            except DataValidationError as e:  # Incluye InsufficientDataError (rangos cortos)
+                    FinancialSeries(
+                        datos_limpios,
+                        TipoActivo.ACCION,
+                        proveedor="Polygon",
+                        moneda=metadatos["moneda"],
+                        bolsa=metadatos["bolsa"],
+                        metadatos={"nombre": metadatos["nombre"]}
+                    )
+                )
+            except (DataValidationError, BadResponse) as e:  # Incluye InsufficientDataError
                 errores.append(f"{ticker} ({e})")
 
         if errores:

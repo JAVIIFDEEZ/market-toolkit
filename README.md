@@ -70,7 +70,10 @@ MSFT acción Polygon 2024-11-04 2026-11-02 500
 
 #### Trabajar con una serie
 
-Cada `FinancialSeries` calcula sus estadísticos al crearse:
+Cada `FinancialSeries` calcula sus estadísticos al crearse. La moneda y la bolsa salen de los
+detalles del ticker en Polygon: la bolsa es la principal de cotización (`NASDAQ`, `NYSE`...) y,
+si Polygon no la indica, `Desconocido`. El precio es el consolidado de todos los mercados de
+EE.UU.
 
 ```python
 aapl = series[0]
@@ -78,11 +81,11 @@ aapl.resumen()
 ```
 
 ```
-nombre                     AAPL
+nombre                     Apple Inc.
 activo                     AAPL
 tipo                       acción
-moneda                     None
-bolsa                      None
+moneda                     USD
+bolsa                      NASDAQ
 proveedor                  Polygon
 inicio                     2024-11-04
 fin                        2026-11-02
