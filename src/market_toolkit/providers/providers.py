@@ -7,6 +7,7 @@ from abc import ABC, abstractmethod
 from typing import Any, Self
 
 import pandas as pd
+import requests
 import yfinance
 from fredapi import Fred
 from massive import RESTClient
@@ -20,7 +21,7 @@ from market_toolkit.exceptions import (
     ProviderError,
     RateLimitError,
 )
-from market_toolkit.models import FinancialSeries, MacroSeries, TipoActivo
+from market_toolkit.models import TipoActivo, SerieTemporal, FinancialSeries, MacroSeries
 from market_toolkit.preprocessing import limpiar_serie
 
 
@@ -40,6 +41,54 @@ def _resolver_api_key(api_key: str | None, api_key_config: str | None, proveedor
     if api_key == "":
         raise ValueError("No se ha introducido ninguna API key.")
     return api_key
+
+def _calcular_fechas(
+    inicio: Any,
+    fin: Any,
+    periodo: str | None
+) -> tuple[pd.Timestamp | None, pd.Timestamp | None]:
+    """Calcula un rango inclusivo y devuelve siempre sus dos fechas.
+
+    Los periodos admitidos por el cálculo son ``max``, ``ytd`` y cantidades con sufijo
+    ``d``, ``mo`` o ``y``. Cada provider aporta la primera fecha histórica disponible y
+    valida las restricciones particulares de su API.
+    """
+    desde = pd.Timestamp(inicio).normalize() if inicio is not None else None
+    hasta = pd.Timestamp(fin).normalize() if fin is not None else None
+
+    if desde is not None and hasta is not None:
+        periodo = None
+    elif periodo is None and desde is None:
+        periodo = None
+
+    if periodo not in (None, "max"):
+        coincidencia = re.fullmatch(r"(\d+)(d|mo|y)", periodo)
+        if coincidencia is None:
+            raise ValueError(
+                f"Periodo '{periodo}' no válido. Usa 'max' o una cantidad "
+                "seguida de 'd', 'mo' o 'y'."
+            )
+        cantidad, unidad = int(coincidencia[1]), coincidencia[2]
+        if cantidad < 1:
+            raise ValueError("La duración de periodo debe ser mayor que cero.")
+        if unidad == "d":
+            desplazamiento = pd.DateOffset(days=cantidad)
+        elif unidad == "mo":
+            desplazamiento = pd.DateOffset(months=cantidad)
+        else:
+            desplazamiento = pd.DateOffset(years=cantidad)
+
+        if hasta is not None:
+            desde = hasta - desplazamiento
+        elif desde is not None:
+            hasta = desde + desplazamiento
+        else:
+            hasta = pd.Timestamp.now().normalize()
+            desde = hasta - desplazamiento
+
+    if desde is not None and hasta is not None and desde > hasta:
+        raise ValueError("La fecha de inicio no puede ser posterior a la fecha de fin.")
+    return desde, hasta
 
 
 class Provider(ABC):
@@ -62,7 +111,7 @@ class Provider(ABC):
     @abstractmethod
     def download(
         self, *, inicio: Any = None, fin: Any = None, periodo: str | None = None, **opciones: Any
-    ) -> list[FinancialSeries]:
+    ) -> list[SerieTemporal]:
         """
         Descarga los datos financieros durante el periodo especificado para los
         tickers configurados en este proveedor.
@@ -101,14 +150,14 @@ class YahooFinanceProvider(Provider):
 
     def __init__(self, tickers: list[str]) -> None:
         """
-        Initialize un objeto de proveedor de Yahoo Finance.
+        Inicializa un objeto de proveedor de Yahoo Finance.
         :param tickers: Los tickers de los que se quiere obtener la información.
         """
         super().__init__(tickers)
 
     def _validar_input(self, tickers: list[str]) -> list[str]:
         """
-        Función que comprueba que los tickers de acciones e índices bursátiles
+        Función que comprueba que los tickers sean de acciones e índices bursátiles
         son válidos y conserva únicamente aquellos que lo son.
         :param tickers: Los tickers a comprobar.
         :return: Una lista formada por los tickers válidos.
@@ -327,50 +376,6 @@ class PolygonProvider(Provider):
             return ProviderError(f"Polygon ha rechazado la API key: {mensaje}")
         return ProviderError(f"Error de Polygon: {mensaje}")
 
-    def _calcular_fechas(self, inicio: str | None, fin: str | None, periodo: str | None) -> tuple[
-        str, str]:
-        """
-        Calcula las fechas de inicio y fin, ya que Polygon necesita siempre las dos.
-        Si la fecha de inicio es anterior a lo que cubre el plan, se recorta y se avisa.
-        :return: Tupla (inicio, fin) en formato 'YYYY-MM-DD'.
-        """
-        hoy = pd.Timestamp.today().normalize()
-        inicio_usuario = inicio
-
-        # Fecha de fin: la indicada o, por defecto, ayer (último día cerrado)
-        if fin is None:
-            fin = hoy - pd.Timedelta(days=1)
-        else:
-            fin = pd.Timestamp(fin)
-
-        # Fecha de inicio: la indicada o, si no, fin menos el periodo (por defecto 2 años)
-        if inicio is None:
-            if periodo is None:
-                periodo = "2y"
-            if periodo not in self.PERIODOS:
-                raise ValueError(
-                    f"Periodo '{periodo}' no válido. Usa uno de: {', '.join(self.PERIODOS)}.")
-            inicio = fin - pd.Timedelta(days=self.PERIODOS[periodo])
-        else:
-            inicio = pd.Timestamp(inicio)
-
-        # Comprobar el límite del plan gratuito (+1 día de margen). Solo se avisa si la fecha de
-        # inicio la ha indicado el usuario; si sale de un periodo ("2y") se ajusta sin avisar
-        limite = hoy - pd.Timedelta(days=self.DIAS_HISTORICO - 1)
-        if inicio < limite:
-            if inicio_usuario is not None:
-                warnings.warn(
-                    f"El plan de Polygon solo cubre desde {limite.date()}. "
-                    f"Se recorta la fecha de inicio {inicio.date()}.",
-                    UserWarning, stacklevel=3)
-            inicio = limite
-        if inicio > fin:
-            raise ValueError(
-                f"El rango pedido termina el {fin.date()}, "
-                f"antes de lo que cubre el plan ({limite.date()}).")
-
-        return inicio.strftime("%Y-%m-%d"), fin.strftime("%Y-%m-%d")
-
     def download(self, *, inicio: str | None = None, fin: str | None = None,
                  periodo: str | None = None, **opciones: Any) -> list[FinancialSeries]:
         """
@@ -379,11 +384,27 @@ class PolygonProvider(Provider):
         últimos 2 años (límite del plan gratuito).
         :param inicio: Fecha de inicio del histórico.
         :param fin: Fecha de fin del histórico.
-        :param periodo: Duración del histórico ("3mo", "6mo", "1y", "2y").
-        Se ignora si se ha establecido una fecha de inicio.
+        :param periodo: Duración del histórico ("3mo", "6mo", "1y", "2y", "max"). Si solo se indica
+            una fecha, el periodo calcula el otro límite; con ambas fechas se ignora.
         :return: Lista de FinancialSeries con los precios de cierre ajustados de cada ticker.
         """
-        desde, hasta = self._calcular_fechas(inicio, fin, periodo)
+        hoy = pd.Timestamp.today().normalize()
+        limite = hoy - pd.DateOffset(years=2)
+        desde, hasta = _calcular_fechas(inicio, fin, periodo)
+        if desde is None:
+            desde = limite
+        elif desde < limite:
+            warnings.warn(
+                f"El plan de Polygon solo cubre desde {limite.date()}. "
+                f"Se recorta la fecha de inicio {desde.date()}.",
+                UserWarning, stacklevel=3)
+        if hasta is None:
+            hasta = pd.Timestamp.today().normalize()
+        elif hasta < limite:
+            raise ValueError(
+                f"El rango pedido termina el {hasta.date()}, "
+                f"antes de lo que cubre el plan ({limite.date()}).")
+        desde, hasta = desde.strftime("%Y-%m-%d"), hasta.strftime("%Y-%m-%d")
 
         time.sleep(self.pausa)
         cierres_por_ticker = {}
@@ -510,30 +531,6 @@ class MacroProvider(Provider):
                 UserWarning, stacklevel=2)
         return validos
 
-    @staticmethod
-    def _calcular_fechas(inicio: Any, fin: Any, periodo: str | None) -> tuple[
-        pd.Timestamp | None, pd.Timestamp | None]:
-        """
-        Calcula las fechas de inicio y fin. `None` significa sin límite (todo el histórico).
-        :param periodo: Duración del histórico: "max" o un número seguido de "mo" o "y"
-            (por ejemplo "6mo", "5y"). Se ignora si se ha establecido una fecha de inicio.
-        :return: Tupla (inicio, fin).
-        """
-        fin = None if fin is None else pd.Timestamp(fin)
-        if inicio is not None:
-            return pd.Timestamp(inicio), fin
-        if periodo is None or periodo == "max":
-            return None, fin
-        coincidencia = re.fullmatch(r"(\d+)(mo|y)", periodo)
-        if coincidencia is None:
-            raise ValueError(
-                f"Periodo '{periodo}' no válido. Usa 'max' o, por ejemplo, '6mo' o '5y'.")
-        cantidad, unidad = int(coincidencia[1]), coincidencia[2]
-        desplazamiento = pd.DateOffset(months=cantidad) if unidad == "mo" \
-            else pd.DateOffset(years=cantidad)
-        referencia = fin if fin is not None else pd.Timestamp.today().normalize()
-        return referencia - desplazamiento, fin
-
     def _parametros_frecuencia(self, frecuencia: str | None, agregacion: str | None,
                                vintage: str | None) -> dict[str, str]:
         """
@@ -585,8 +582,9 @@ class MacroProvider(Provider):
         especificado. Si no se especifica ningún parámetro, se descarga todo el histórico.
         :param inicio: Fecha de inicio del histórico.
         :param fin: Fecha de fin del histórico.
-        :param periodo: Duración del histórico: "max" o, por ejemplo, "6mo" o "5y".
-        Se ignora si se ha establecido una fecha de inicio.
+        :param periodo: Duración del histórico: "max" o una duracion en meses o años,
+        por ejemplo "6mo" o "5y". Si solo se indica una fecha, el periodo calcula el otro
+        límite y con ambas fechas se ignora.
         :param opciones: Opciones de descarga:
             - `vintage`: `None` para los últimos datos publicados, `"first"` para la primera
               publicación de cada dato o una fecha para los datos tal y como se conocían ese
@@ -603,7 +601,7 @@ class MacroProvider(Provider):
         if opciones:
             raise ValueError(f"Opciones no válidas: {', '.join(opciones)}.")
         parametros = self._parametros_frecuencia(frecuencia, agregacion, vintage)
-        desde, hasta = self._calcular_fechas(inicio, fin, periodo)
+        desde, hasta = _calcular_fechas(inicio, fin, periodo)
 
         series = []
         errores = []
@@ -644,5 +642,134 @@ class MacroProvider(Provider):
     def __repr__(self) -> str:
         return f"MacroProvider object series<{', '.join(self.tickers)}>"
 
+class AlphaVantageProvider(Provider):
+    """Proveedor de precios diarios de oro, plata y petróleo Brent."""
 
-    
+    URL = "https://www.alphavantage.co/query"
+    TIMEOUT = 30
+    COMMODITIES = {
+        "ORO": "GOLD",
+        "GOLD": "GOLD",
+        "XAU": "GOLD",
+        "PLATA": "SILVER",
+        "SILVER": "SILVER",
+        "XAG": "SILVER",
+        "PETRÓLEO": "BRENT",
+        "PETROLEO": "BRENT",
+        "BRENT": "BRENT",
+    }
+    NOMBRE_KEY = {"GOLD": ("Oro", "price"), "SILVER": ("Plata", "price"),
+                  "BRENT": ("Barril de petróleo crudo Brent", "value")}
+    PERIODOS = {"1d", "5d", "1mo", "3mo", "6mo", "1y", "2y", "5y", "10y", "ytd", "max"}
+
+    def __init__(self, tickers: list[str], pausa: float = 1.1, api_key: str | None = None) -> None:
+        """
+        Inicializa un objeto de proveedor de Alpha Vantage. Busca la API key en el entorno
+        o en el fichero .env. En caso de no encontrarla la pide por pantalla.
+        :param tickers: Los tickers de los que se quiere obtener la información.
+        :param pausa: Pausa temporal entre las descargas en lote para respetar el límite de
+        peticiones por segundo del proveedor.
+        :param api_key: Key persoal para acceder a la API. Si no se proporciona se busca en
+        el entorno o se pide por pantalla.
+        """
+        self.api_key = _resolver_api_key(api_key, config.ALPHAVANTAGE_API_KEY, "Polygon")
+        self.pausa = pausa
+        super().__init__(tickers)
+
+    def _validar_input(self, tickers: list[str]) -> list[str]:
+        """
+        Función que comprueba que los tickers introducidos son válidos y conserva únicamente
+        aquellos que lo son.
+        :param tickers: Los tickers a comprobar.
+        :return: Una lista formada por los tickers válidos.
+        """
+        tickers = super()._validar_input(tickers)
+        invalidos = set(tickers) - self.COMMODITIES.keys()
+        if invalidos:
+            raise ValueError(
+                f"Commodities no admitidos: {', '.join(invalidos)}. "
+                f"Usa: {', '.join(self.COMMODITIES)}."
+            )
+        return list(dict.fromkeys(self.COMMODITIES[ticker] for ticker in tickers))
+
+    def download(
+        self,
+        *,
+        inicio: Any = None,
+        fin: Any = None,
+        periodo: str | None = None,
+        **opciones: Any,
+    ) -> list[FinancialSeries]:
+        """
+        Descarga los datos financioneros durante el periodo especificado para los tickers
+        (Oro, Plata y Barril de Brent) configurados en este provedor.
+        :param inicio: Fecha de inicio del histórico.
+        :param fin: Fecha de fin del histórico.
+        :param periodo: Duración del histórico: "max" o una duracion en días, meses o años,
+        por ejemplo "3d", "6mo" o "5y". Si solo se indica una fecha, el periodo calcula el otro
+        límite y con ambas fechas se ignora.
+        :param opciones: Opciones extra.
+        :return: Dataframe con los datos de cierre ajustados para cada uno de los tickers
+        configurados en este proveedor.
+        """
+        resultados = []
+        sin_datos = []
+        for i, ticker in enumerate(self.tickers):
+            if i > 0:
+                time.sleep(self.pausa)
+            params: dict[str, str] = {"apikey": self.api_key, "interval": "daily"}
+            if ticker in {"GOLD", "SILVER"}:
+                params.update({"function": "GOLD_SILVER_HISTORY", "symbol": ticker})
+            else:
+                params["function"] = "BRENT"
+
+            try:
+                response = requests.get(self.URL, params=params, timeout=self.TIMEOUT)
+                response.raise_for_status()
+                payload = response.json()
+            except (requests.RequestException, ValueError) as e:
+                raise ProviderError(f"Error al descargar {ticker} de Alpha Vantage: {e}")
+
+            mensaje_error = (payload.get("Error Message") or payload.get("Information"))
+            if mensaje_error:
+                raise ProviderError(f"Alpha Vantage no pudo descargar {ticker}: {mensaje_error}")
+
+            datos = payload.get("data")
+            if not isinstance(datos, list):
+                raise ProviderError(f"Respuesta sin serie temporal válida para {ticker}.")
+            nombre, llave = self.NOMBRE_KEY[ticker]
+            serie = pd.Series(
+                {pd.Timestamp(fila["date"]): pd.to_numeric(fila[llave], errors="coerce")
+                 for fila in datos},
+                name=ticker,
+                dtype=float,
+            )
+            serie = limpiar_serie(serie)
+            if serie.empty:
+                sin_datos.append(ticker)
+                continue
+            desde, hasta = _calcular_fechas(inicio, fin, periodo)
+            serie = serie.loc[desde:hasta]
+            resultados.append(
+                FinancialSeries(
+                    serie,
+                    TipoActivo.COMMODITY,
+                    moneda="USD",
+                    proveedor="Alpha Vantage",
+                    metadatos={"nombre": nombre},
+                )
+            )
+        if sin_datos:
+            warnings.warn(
+                f"No hay datos de Alpha Vantage para {', '.join(sin_datos)} en el rango solicitado.",
+                UserWarning,
+                stacklevel=2,
+            )
+        if not resultados:
+            raise DataNotFoundException(
+                f"No se ha encontrado información para {', '.join(self.tickers)} en Alpha Vantage."
+            )
+        return resultados
+
+    def __repr__(self) -> str:
+        return f"AlphaVantageProvider object tickers<{', '.join(self.tickers)}>"

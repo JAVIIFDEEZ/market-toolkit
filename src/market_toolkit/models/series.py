@@ -15,6 +15,7 @@ class TipoActivo(Enum):
 
     ACCION = "acción"
     INDICE = "índice"
+    COMMODITY = "materia prima"
 
 
 @dataclass(frozen=True, eq=False)
