@@ -14,3 +14,9 @@ MIN_OBSERVACIONES: int = 30
 
 ALPHAVANTAGE_API_KEY: str | None = os.getenv("ALPHAVANTAGE_API_KEY") or None
 """Clave de la API de Alpha Vantage. `None` si no está configurada."""
+
+POLYGON_API_KEY: str | None = os.getenv("POLYGON_API_KEY") or None
+"""Clave de la API de Polygon (Massive). `None` si no está configurada."""
+
+FRED_API_KEY: str | None = os.getenv("FRED_API_KEY") or None
+"""Clave de la API de FRED/ALFRED. `None` si no está configurada."""

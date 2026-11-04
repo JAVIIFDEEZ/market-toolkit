@@ -51,16 +51,19 @@ def limpiar_dataframe(
         df = df.dropna(axis=0, how="any")
     return df
 
-def limpiar_serie(serie: pd.Series) -> pd.Series:
+def limpiar_serie(serie: pd.Series, permitir_negativos: bool = False) -> pd.Series:
     """
     Función para la limpieza de datos. Tratamiento de fechas duplicadas, valores nulos o no válidos.
     :param serie: Serie con los datos historicos a limpiar.
+    :param permitir_negativos: `True` para conservar los valores negativos, que son válidos en
+    series macroeconómicas (tipos de interés, spreads, variaciones...).
     :return: Serie con los datos limpios.
     """
     serie = serie.sort_index()  # Ordenar de forma cronológica
     serie = serie.loc[~serie.index.duplicated(keep="last")]  # Eliminar fechas duplicadas
     serie = serie.replace([np.inf, -np.inf], np.nan)  # Reemplazar valores infinitos por NaN
-    serie = serie.where(serie >= 0, np.nan)  # Reemplazar valores negativos por NaN
+    if not permitir_negativos:
+        serie = serie.where(serie >= 0, np.nan)  # Reemplazar valores negativos por NaN
     serie = serie.dropna() # Eliminar las fechas sin datos
     return serie
 

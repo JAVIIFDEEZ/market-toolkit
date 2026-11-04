@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "market-toolkit"
-version = "0.1.5"
+version = "0.1.6"
 description = "Toolkit de extracción, análisis bursátil y gestión de carteras"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -17,7 +17,8 @@ dependencies = [
   "requests",          # Alpha Vantage vía REST, sin librería extra
   "curl_cffi",         # CSV de FRED con impersonate="chrome", sin clave
   "python-dotenv",
-  "massive"
+  "massive", 
+  "fredapi"
 ]
 
 [project.optional-dependencies]
