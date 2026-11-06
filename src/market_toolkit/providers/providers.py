@@ -21,7 +21,7 @@ from market_toolkit.exceptions import (
     ProviderError,
     RateLimitError,
 )
-from market_toolkit.models import TipoActivo, SerieTemporal, FinancialSeries, MacroSeries
+from market_toolkit.models import FinancialSeries, MacroSeries, SerieTemporal, TipoActivo
 from market_toolkit.preprocessing import limpiar_serie
 
 
@@ -211,6 +211,8 @@ class YahooFinanceProvider(Provider):
         for ticker in self.tickers:
             yf_ticker = yfinance.Ticker(ticker)
             datos = yf_ticker.history(start=inicio, end=fin, period=periodo, auto_adjust=True)
+            # Ajustar a la misma zona horaria
+            datos.index = datos.index.tz_localize(None).normalize()
             info = yf_ticker.get_info()
             datos = datos["Close"].rename(ticker)  # Nos quedamos con los datos de cierre ajustados
             datos_limpios = limpiar_serie(datos)
@@ -728,7 +730,7 @@ class AlphaVantageProvider(Provider):
                 response.raise_for_status()
                 payload = response.json()
             except (requests.RequestException, ValueError) as e:
-                raise ProviderError(f"Error al descargar {ticker} de Alpha Vantage: {e}")
+                raise ProviderError(f"Error al descargar {ticker} de Alpha Vantage: {e}") from e
 
             mensaje_error = (payload.get("Error Message") or payload.get("Information"))
             if mensaje_error:
@@ -761,7 +763,8 @@ class AlphaVantageProvider(Provider):
             )
         if sin_datos:
             warnings.warn(
-                f"No hay datos de Alpha Vantage para {', '.join(sin_datos)} en el rango solicitado.",
+                f"No hay datos de Alpha Vantage para {', '.join(sin_datos)} "
+                f"en el rango solicitado.",
                 UserWarning,
                 stacklevel=2,
             )

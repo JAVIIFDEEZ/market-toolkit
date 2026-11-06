@@ -57,13 +57,13 @@ def test_limpiar_dataframe_elimina_filas_y_columnas_vacias(precios_sinteticos):
 
 
 def test_limpiar_dataframe_rellena_nulos_de_alineacion(precios_calendarios_distintos):
-    limpio = limpiar_dataframe(precios_calendarios_distintos, "relleno")
+    limpio = limpiar_dataframe(precios_calendarios_distintos, alineacion_temporal="relleno")
     assert not limpio.isna().any().any()
-    assert len(limpio) == len(precios_calendarios_distintos)
+    assert len(limpio) == len(precios_calendarios_distintos) - 5
 
 
 def test_limpiar_dataframe_elimina_filas_con_nulos_de_alineacion(precios_calendarios_distintos):
-    limpio = limpiar_dataframe(precios_calendarios_distintos, "eliminacion")
+    limpio = limpiar_dataframe(precios_calendarios_distintos, alineacion_temporal="eliminacion")
     assert not limpio.isna().any().any()
     assert len(limpio) == len(precios_calendarios_distintos) - 3 - 5 - 1
 
