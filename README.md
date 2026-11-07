@@ -368,6 +368,32 @@ también). Después se combinan con los **pesos actuales** de la cartera:
 | `semilla` | Fija el azar para obtener siempre el mismo resultado | `None` |
 | `guardar_graficos` | Guarda los gráficos de la simulación | `True` |
 
+Ejemplo con todos los parámetros retocados:
+
+```python
+from market_toolkit.models.montecarlo import MonteCarlo
+
+# Un activo: supuestos fijados a mano
+mc_activo = MonteCarlo(
+    aapl,                       # FinancialSeries a simular
+    n_simulaciones=10_000,      # 10.000 caminos
+    horizonte=504,              # 2 años de sesiones
+    rentabilidad=0.08,          # 8 % anual esperado
+    volatilidad=0.25,           # 25 % de volatilidad anual
+    valor_inicial=10_000,       # Se parte de 10.000 USD en lugar del último precio
+    semilla=42,                 # Resultado reproducible
+    guardar_graficos=True,      # Borra los gráficos anteriores y guarda los nuevos
+)
+
+
+# Los resultados también se pueden ajustar
+mc_cartera.percentiles((1, 10, 50, 90, 99))   # Percentiles a elección en cada sesión
+mc_cartera.var(0.99)                           # VaR con otra confianza
+mc_cartera.cvar(0.99)                          # CVaR con otra confianza
+mc_cartera.graficar(n_trayectorias=100)       # Mostrar por pantalla con 100 caminos de fondo
+mc_cartera.guardar_graficos(n_trayectorias=100, carpeta="mis_graficos")   # Guardar en otra carpeta
+```
+
 ### Resultados
 
 | Resultado | Qué es |
