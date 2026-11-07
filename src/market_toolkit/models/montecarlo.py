@@ -1,5 +1,8 @@
+from __future__ import annotations
+
 from collections.abc import Mapping, Sequence
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import matplotlib.dates as mdates
 import matplotlib.pyplot as plt
@@ -9,17 +12,20 @@ from matplotlib.figure import Figure
 
 from market_toolkit.config import DIAS_COTIZACION_ANUAL
 from market_toolkit.exceptions import InsufficientDataError
-from market_toolkit.models.portfolio import Portfolio
 from market_toolkit.models.series import FinancialSeries
+
+if TYPE_CHECKING:
+    # Solo para las anotaciones: Portfolio usa MonteCarlo y un import real sería circular
+    from market_toolkit.models.portfolio import Portfolio
 
 Supuesto = float | Mapping[str, float] | None
 
 # Carpeta donde se guardan los gráficos de la última simulación
 CARPETA_GRAFICOS = Path(__file__).parent / "graficos"
 
-# Colores de los gráficos: aqua de claro a oscuro para las bandas de percentiles y la mediana,
-# violeta tenue para las trayectorias de muestra, aqua/naranja para ganancia/pérdida en la
-# distribución y rojo solo para el umbral del VaR
+# Colores de los gráficos: aqua de claro a oscuro para las bandas de percentiles, negro
+# semitransparente para las trayectorias de muestra, media en negro discontinuo y mediana en azul,
+# aqua/naranja para ganancia/pérdida en la distribución y rojos solo para los umbrales del VaR
 COLORES = {
     "superficie": "#fcfcfb",
     "texto": "#0b0b0b",
@@ -27,14 +33,17 @@ COLORES = {
     "texto_tenue": "#898781",
     "rejilla": "#e1e0d9",
     "eje": "#c3c2b7",
-    "trayectorias": "#6250d6",
+    "trayectorias": "#0b0b0b",
     "banda_exterior": "#c4e9db",
     "banda_interior": "#8cd6bb",
-    "mediana": "#127a55",
+    "media": "#0b0b0b",
+    "mediana": "#2a78d6",
     "ganancia": "#1baf7a",
     "perdida": "#eb6834",
-    "var": "#d03b3b",
+    "var_95": "#d03b3b",
+    "var_99": "#8b1d1d",
 }
+GROSOR_REFERENCIAS = 2.5  # Grosor de las líneas de valores fijos (media, mediana, VaR...)
 
 
 class MonteCarlo:
@@ -84,7 +93,10 @@ class MonteCarlo:
         :param guardar_graficos: `True` para borrar los gráficos de la simulación anterior y
             guardar los de esta en `models/graficos/` (trayectorias.png y distribucion.png).
         """
-        if not isinstance(objetivo, FinancialSeries | Portfolio):
+        # Una cartera se reconoce por sus precios alineados y sus pesos (sin importar Portfolio)
+        es_cartera = (isinstance(getattr(objetivo, "activos", None), pd.DataFrame)
+                      and isinstance(getattr(objetivo, "pesos", None), pd.DataFrame))
+        if not (isinstance(objetivo, FinancialSeries) or es_cartera):
             raise TypeError(
                 f"Solo se puede simular una FinancialSeries o un Portfolio, no "
                 f"{type(objetivo).__name__}.")
@@ -106,9 +118,13 @@ class MonteCarlo:
             self.pesos = None
             por_defecto = float(objetivo.serie_temporal.iloc[-1])
         else:
-            precios = objetivo.activos.dropna()
+            precios = objetivo.activos.dropna()  # Solo las fechas en las que cotizan todos
             historicas, vol_historicas = self._estadisticos_historicos(precios)
-            self.pesos = objetivo.pesos.iloc[-1]  # Pesos actuales de la cartera
+            # Pesos actuales de la cartera (última fila), emparejados por nombre con los precios
+            self.pesos = objetivo.pesos.iloc[-1].reindex(precios.columns).astype(float)
+            if self.pesos.isna().any():
+                faltan = ", ".join(self.pesos.index[self.pesos.isna()])
+                raise ValueError(f"La cartera no tiene pesos actuales para: {faltan}.")
             por_defecto = 100.0
         self.rentabilidades = self._aplicar_supuesto(historicas, rentabilidad, "rentabilidad")
         self.volatilidades = self._aplicar_supuesto(vol_historicas, volatilidad, "volatilidad")
@@ -283,10 +299,23 @@ class MonteCarlo:
         return f"Cartera ({', '.join(self.pesos.index)})"
 
     @property
+    def _unidad(self) -> str:
+        """
+        Unidad del valor simulado: la moneda del activo, la moneda común de los activos de la
+        cartera o, si no se conoce o la cartera mezcla monedas, "puntos".
+        """
+        if self.pesos is None:
+            return self.objetivo.moneda or "puntos"
+        info = getattr(self.objetivo, "info", None)
+        if not isinstance(info, pd.DataFrame) or "moneda" not in info.index:
+            return "puntos"
+        monedas = {moneda for moneda in info.loc["moneda"] if isinstance(moneda, str) and moneda}
+        return monedas.pop() if len(monedas) == 1 else "puntos"
+
+    @property
     def _etiqueta_valor(self) -> str:
-        """Etiqueta del eje del valor, con la moneda del activo si se conoce."""
-        moneda = getattr(self.objetivo, "moneda", None)
-        return f"Valor ({moneda})" if moneda else "Valor"
+        """Etiqueta del eje del valor, con sus unidades."""
+        return f"Valor ({self._unidad})"
 
     @staticmethod
     def _preparar_eje(eje) -> None:
@@ -302,8 +331,8 @@ class MonteCarlo:
 
     def _dibujar_trayectorias(self, figura: Figure, n_trayectorias: int) -> Figure:
         """
-        Dibuja una muestra de trayectorias con las bandas de percentiles 5-95 y 25-75 y la
-        mediana de cada sesión.
+        Dibuja una muestra de trayectorias con las bandas de percentiles 5-95 y 25-75, la media
+        y la mediana de cada sesión.
         :param figura: Figura vacía en la que dibujar.
         :param n_trayectorias: Número de trayectorias individuales a dibujar de fondo.
         :return: La figura dibujada.
@@ -311,10 +340,11 @@ class MonteCarlo:
         eje = figura.subplots()
         self._preparar_eje(eje)
         percentiles = self.percentiles((5, 25, 50, 75, 95))
+        media = self.trayectorias.mean(axis=1)
         fechas = self.trayectorias.index
         muestra = self.trayectorias.iloc[:, :min(n_trayectorias, self.n_simulaciones)]
         eje.plot(fechas, muestra.to_numpy(), color=COLORES["trayectorias"], linewidth=0.6,
-                 alpha=0.18, zorder=1)
+                 alpha=0.12, zorder=1)
         eje.fill_between(fechas, percentiles["p5"], percentiles["p95"],
                          color=COLORES["banda_exterior"], alpha=0.85, linewidth=0, zorder=2,
                          label="Percentiles 5-95")
@@ -323,16 +353,30 @@ class MonteCarlo:
                          label="Percentiles 25-75")
         eje.plot(fechas, percentiles["p50"], color=COLORES["mediana"], linewidth=2, zorder=4,
                  label="Mediana")
+        eje.plot(fechas, media, color=COLORES["media"], linewidth=2, linestyle="--", zorder=5,
+                 label="Media")
         eje.axhline(self.valor_inicial, color=COLORES["texto_secundario"], linewidth=1,
                     zorder=5, label="Valor inicial")
-        eje.plot([], [], color=COLORES["trayectorias"], alpha=0.5, linewidth=1,
+        eje.plot([], [], color=COLORES["trayectorias"], alpha=0.35, linewidth=1,
                  label=f"Trayectorias (muestra de {muestra.shape[1]})")
-        # Etiquetas directas solo al final de la mediana y de los extremos de la banda
-        for columna, nombre in (("p95", "p95"), ("p50", "Mediana"), ("p5", "p5")):
-            valor = percentiles[columna].iloc[-1]
-            eje.annotate(f"{nombre} {valor:,.2f}", (fechas[-1], valor), xytext=(-4, 4),
-                         textcoords="offset points", ha="right", fontsize=9,
-                         color=COLORES["texto_secundario"], zorder=6)
+        # Etiquetas directas solo al final de la media, la mediana y los extremos de la banda.
+        # Se separan verticalmente si están demasiado cerca y llevan fondo para que ninguna
+        # línea las atraviese
+        etiquetas = sorted(
+            (float(serie.iloc[-1]), nombre)
+            for nombre, serie in (("p95", percentiles["p95"]), ("Media", media),
+                                  ("Mediana", percentiles["p50"]), ("p5", percentiles["p5"])))
+        y_min, y_max = eje.get_ylim()
+        separacion = 0.045 * (y_max - y_min)
+        posicion_anterior = -np.inf
+        for valor, nombre in etiquetas:
+            posicion = max(valor, posicion_anterior + separacion)
+            eje.annotate(f"{nombre} {valor:,.2f}", (fechas[-1], posicion), xytext=(-4, 0),
+                         textcoords="offset points", ha="right", va="center", fontsize=9,
+                         color=COLORES["texto_secundario"], zorder=6,
+                         bbox={"boxstyle": "round,pad=0.2", "facecolor": COLORES["superficie"],
+                               "edgecolor": "none", "alpha": 0.85})
+            posicion_anterior = posicion
         eje.set_xlim(fechas[0], fechas[-1])
         eje.xaxis.set_major_formatter(mdates.ConciseDateFormatter(eje.xaxis.get_major_locator()))
         eje.set_ylabel(self._etiqueta_valor, color=COLORES["texto_secundario"])
@@ -347,15 +391,19 @@ class MonteCarlo:
     def _dibujar_distribucion(self, figura: Figure) -> Figure:
         """
         Dibuja el histograma del valor final, separando los escenarios con pérdida y con
-        ganancia, con el valor inicial, la mediana y el umbral del VaR al 95 %.
+        ganancia, con el valor inicial, la media, la mediana y los umbrales del VaR al 95 % y
+        al 99 %.
         :param figura: Figura vacía en la que dibujar.
         :return: La figura dibujada.
         """
         eje = figura.subplots()
         self._preparar_eje(eje)
         finales = self.valores_finales
+        media = float(finales.mean())
         mediana = float(finales.median())
-        umbral_var = self.valor_inicial * (1 - self.var(0.95))  # Valor final del percentil 5
+        # Valor final por debajo del cual queda el 5 % / 1 % de los escenarios
+        umbral_var_95 = self.valor_inicial * (1 - self.var(0.95))
+        umbral_var_99 = self.valor_inicial * (1 - self.var(0.99))
         # 50 intervalos con el valor inicial como borde, para que ninguna barra mezcle
         # escenarios con pérdida y con ganancia
         ancho = (finales.max() - finales.min()) / 50 or 1.0
@@ -368,12 +416,16 @@ class MonteCarlo:
         eje.hist(finales[finales >= self.valor_inicial], bins=intervalos,
                  color=COLORES["ganancia"], edgecolor=COLORES["superficie"], linewidth=0.6,
                  label="Ganancia")
-        eje.axvline(self.valor_inicial, color=COLORES["texto_secundario"], linewidth=1,
-                    label=f"Valor inicial {self.valor_inicial:,.2f}")
-        eje.axvline(mediana, color=COLORES["mediana"], linewidth=2,
-                    label=f"Mediana {mediana:,.2f}")
-        eje.axvline(umbral_var, color=COLORES["var"], linewidth=1.5,
-                    label=f"VaR 95 % {umbral_var:,.2f}")
+        referencias = (
+            (self.valor_inicial, COLORES["texto_secundario"], "-", "Valor inicial"),
+            (media, COLORES["media"], "--", "Media"),
+            (mediana, COLORES["mediana"], "-", "Mediana"),
+            (umbral_var_95, COLORES["var_95"], "-", "VaR 95 %"),
+            (umbral_var_99, COLORES["var_99"], "-", "VaR 99 %"),
+        )
+        for valor, color, estilo, nombre in referencias:
+            eje.axvline(valor, color=color, linestyle=estilo, linewidth=GROSOR_REFERENCIAS,
+                        label=f"{nombre} {valor:,.2f}")
         eje.set_xlabel(f"{self._etiqueta_valor} al final del horizonte",
                        color=COLORES["texto_secundario"])
         eje.set_ylabel("Nº de simulaciones", color=COLORES["texto_secundario"])
@@ -381,14 +433,14 @@ class MonteCarlo:
             f"Distribución del valor final · {self._nombre_objetivo} · "
             f"{self.horizonte} sesiones", loc="left", color=COLORES["texto"], fontsize=12)
         # Leyenda y estadísticos a la derecha, sobre la cola de la distribución, para no tapar
-        # las líneas del valor inicial, la mediana y el VaR
+        # las líneas de los valores de referencia
         eje.legend(loc="upper right", frameon=False, fontsize=9,
                    labelcolor=COLORES["texto_secundario"])
         eje.text(
-            0.98, 0.60,
+            0.98, 0.50,
             f"Prob. de pérdida: {(finales < self.valor_inicial).mean():.1%}\n"
-            f"VaR 95 %: {self.var(0.95):.1%}\n"
-            f"CVaR 95 %: {self.cvar(0.95):.1%}\n"
+            f"VaR 95 %: {self.var(0.95):.1%}   CVaR 95 %: {self.cvar(0.95):.1%}\n"
+            f"VaR 99 %: {self.var(0.99):.1%}   CVaR 99 %: {self.cvar(0.99):.1%}\n"
             f"Rent. media: {self.rentabilidades_finales.mean():.1%}",
             transform=eje.transAxes, ha="right", va="top", fontsize=9,
             color=COLORES["texto_secundario"], linespacing=1.5,

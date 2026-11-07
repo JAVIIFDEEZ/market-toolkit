@@ -305,3 +305,107 @@ distintos por las revisiones y el cambio de año base.
 </details>
 
 </details>
+
+<details>
+<summary><h2>Simulación</h2></summary>
+
+`MonteCarlo` (en `models/montecarlo.py`) simula **miles de futuros posibles** de un activo
+(`FinancialSeries`) o de una cartera (`Portfolio`) y resume qué puede pasar: cuánto se espera
+ganar, qué probabilidad hay de perder y cuánto se puede perder en los peores escenarios.
+
+```python
+from market_toolkit.models.montecarlo import MonteCarlo
+
+mc = MonteCarlo(aapl, n_simulaciones=5000, horizonte=252, semilla=42)   # Un activo
+mc = MonteCarlo(cartera, horizonte=504, rentabilidad={"MSFT": 0.05})   # Una cartera
+mc.resumen()
+```
+
+### Cómo funciona
+
+Cada simulación construye un camino día a día: el valor de hoy se multiplica por un rendimiento
+diario **aleatorio**, sacado de una distribución normal (gaussiana). Repitiendo esto
+`n_simulaciones` veces durante `horizonte` sesiones se obtiene un abanico de futuros posibles.
+
+**1. De dónde salen la media y la desviación.** Se parte de dos supuestos anuales:
+
+| Supuesto | Si no se indica, se usa el histórico |
+|---|---|
+| Rentabilidad anual `R` | `(1 + media de los rendimientos diarios)^252 - 1` |
+| Volatilidad anual `σ` | `desviación típica de los rendimientos diarios × √252` |
+
+En un activo son los mismos estadísticos que ya calcula `FinancialSeries` al crearse. En una
+cartera se calculan para cada activo sobre las fechas en las que cotizan todos. También se pueden
+fijar a mano: `rentabilidad=0.08, volatilidad=0.20` (8 % y 20 % anual).
+
+**2. Paso a diario.** Los supuestos anuales se convierten a un día (252 sesiones al año):
+
+- Rendimiento diario esperado: `m = (1 + R)^(1/252) - 1`
+- Volatilidad diaria: `s = σ / √252`
+
+**3. La gaussiana.** El rendimiento logarítmico de cada día se saca de una normal con:
+
+- **Desviación** `s`.
+- **Media** `ln(1 + m) - s²/2`. El `- s²/2` es una corrección para que, de media, el activo
+  crezca exactamente al ritmo supuesto. Sin ella, la simulación sobrestimaría la rentabilidad.
+
+**En una cartera**, los activos se simulan a la vez y sus movimientos diarios mantienen las
+**correlaciones históricas** entre ellos (si dos activos suelen subir juntos, en la simulación
+también). Después se combinan con los **pesos actuales** de la cartera:
+
+- `rebalanceo=True` (por defecto): los pesos se mantienen constantes cada día.
+- `rebalanceo=False`: se compra al inicio y no se toca la cartera.
+
+### Parámetros
+
+| Parámetro | Qué hace | Por defecto |
+|---|---|---|
+| `n_simulaciones` | Número de caminos simulados | 1000 |
+| `horizonte` | Sesiones a simular (252 = un año) | 252 |
+| `rentabilidad`, `volatilidad` | Supuestos anuales. En una cartera, un número para todos los activos o un diccionario por activo | Históricos |
+| `valor_inicial` | Valor de partida | Último precio del activo, o 100 en una cartera |
+| `rebalanceo` | Solo carteras: pesos constantes o comprar y mantener | `True` |
+| `semilla` | Fija el azar para obtener siempre el mismo resultado | `None` |
+| `guardar_graficos` | Guarda los gráficos de la simulación | `True` |
+
+### Resultados
+
+| Resultado | Qué es |
+|---|---|
+| `trayectorias` | Todos los caminos: una fila por sesión y una columna por simulación |
+| `valores_finales` | Valor de cada simulación al final del horizonte |
+| `rentabilidades_finales` | Rentabilidad acumulada de cada simulación (`valor final / valor inicial - 1`) |
+| `percentiles()` | Percentiles 5, 25, 50, 75 y 95 del valor en cada sesión |
+| `var(0.95)` | **Value at Risk**: la pérdida que solo se supera en el 5 % peor de los escenarios |
+| `cvar(0.95)` | **Conditional VaR**: la pérdida media dentro de ese 5 % peor de los escenarios |
+| `resumen()` | Diccionario con los supuestos y los resultados principales |
+
+Cómo leer el VaR y el CVaR: con `var(0.95) = 0.24` y `cvar(0.95) = 0.29`, en 95 de cada 100
+escenarios no se pierde más de un 24 %, y en los 5 peores se pierde de media un 29 %. Ambos se
+dan en tanto por uno sobre el valor inicial (positivos cuando son pérdidas). También se pueden
+pedir con otra confianza, por ejemplo `var(0.99)`.
+
+`resumen()` incluye además el valor final medio y mediano, los percentiles 5 y 95 del valor
+final, la rentabilidad media, la **probabilidad de pérdida** (porcentaje de escenarios que acaban
+por debajo del valor inicial), el VaR y el CVaR al 95 %.
+
+### Gráficos
+
+Al crear el objeto se borran los gráficos anteriores y se guardan dos nuevos en
+`models/graficos/` (con `mc.graficar()` también se muestran por pantalla):
+
+- `trayectorias.png`: una muestra de caminos, las bandas de percentiles 5-95 y 25-75, la media y
+  la mediana.
+- `distribucion.png`: histograma del valor final (pérdidas en naranja y ganancias en verde) con
+  el valor inicial, la media, la mediana, el VaR 95 % y el VaR 99 %.
+
+### Limitaciones
+
+- Supone rendimientos **normales**: los movimientos extremos (crisis) son más frecuentes en la
+  realidad, así que el VaR y el CVaR pueden quedarse cortos.
+- La rentabilidad, la volatilidad y las correlaciones se mantienen **constantes** durante todo el
+  horizonte.
+- Con supuestos históricos, se asume que el futuro se comportará como el pasado del periodo
+  descargado.
+
+</details>
