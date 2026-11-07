@@ -7,11 +7,9 @@ import numpy as np
 import pandas as pd
 from matplotlib.figure import Figure
 
-from market_toolkit.config import DIAS_COTIZACION_ANUAL
-from market_toolkit.exceptions import InsufficientDataError
-import market_toolkit.models.series as series
 import market_toolkit.models.portfolio as portfolio
-
+import market_toolkit.models.series as series
+from market_toolkit.config import DIAS_COTIZACION_ANUAL
 
 Supuesto = float | Mapping[str, float] | None
 

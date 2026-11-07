@@ -1,18 +1,19 @@
 from __future__ import annotations
+
 import warnings
-from collections.abc import Sequence, Mapping
+from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING, Literal
 
 import numpy as np
 import pandas as pd
 
+import market_toolkit.models.montecarlo as montecarlo
 from market_toolkit.config import DIAS_COTIZACION_ANUAL
 from market_toolkit.exceptions import InsufficientDataError
 from market_toolkit.preprocessing import juntar_series
-import market_toolkit.models.montecarlo as montecarlo
 
 if TYPE_CHECKING:
-    from  market_toolkit.models.series import FinancialSeries
+    from market_toolkit.models.series import FinancialSeries
 
 
 class Portfolio:
