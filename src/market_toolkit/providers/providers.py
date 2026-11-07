@@ -263,10 +263,10 @@ class PolygonProvider(Provider):
     Proveedor para descargar datos financieros de Polygon.io del plan gratuito (ahora Massive).
     """
 
-    # Periodos admitidos y sus días equivalentes. No hay "1mo" porque ~21 sesiones no llegan
-    # al mínimo de observaciones de FinancialSeries (MIN_OBSERVACIONES)
-    PERIODOS = {"3mo": 90, "6mo": 180, "1y": 365, "2y": 730}
-    DIAS_HISTORICO = 730  # El plan gratuito solo cubre 2 años
+    # Periodos admitidos. No hay "1mo" ni periodos en días porque no llegan al mínimo de
+    # observaciones de FinancialSeries (MIN_OBSERVACIONES), ni más de 2 años por el plan
+    PERIODOS = ("3mo", "6mo", "1y", "2y", "max")
+    ANIOS_HISTORICO = 2  # El plan gratuito solo cubre 2 años
     # Nombres de las bolsas a partir del código MIC que devuelve Polygon en `primary_exchange`
     BOLSAS = {
         "XNAS": "NASDAQ",
@@ -390,22 +390,28 @@ class PolygonProvider(Provider):
             una fecha, el periodo calcula el otro límite; con ambas fechas se ignora.
         :return: Lista de FinancialSeries con los precios de cierre ajustados de cada ticker.
         """
+        # Se comprueba antes de llamar a la API para no esperar las pausas en balde
+        if periodo is not None and periodo not in self.PERIODOS:
+            raise ValueError(
+                f"Periodo '{periodo}' no válido. Usa uno de: {', '.join(self.PERIODOS)}.")
         hoy = pd.Timestamp.today().normalize()
-        limite = hoy - pd.DateOffset(years=2)
+        limite = hoy - pd.DateOffset(years=self.ANIOS_HISTORICO)
         desde, hasta = _calcular_fechas(inicio, fin, periodo)
+        # Primero el fin: si el rango queda entero fuera del plan no tiene sentido recortar
+        if hasta is None:
+            hasta = hoy
+        elif hasta < limite:
+            raise ValueError(
+                f"El rango pedido termina el {hasta.date()}, "
+                f"antes de lo que cubre el plan ({limite.date()}).")
         if desde is None:
             desde = limite
         elif desde < limite:
             warnings.warn(
                 f"El plan de Polygon solo cubre desde {limite.date()}. "
                 f"Se recorta la fecha de inicio {desde.date()}.",
-                UserWarning, stacklevel=3)
-        if hasta is None:
-            hasta = pd.Timestamp.today().normalize()
-        elif hasta < limite:
-            raise ValueError(
-                f"El rango pedido termina el {hasta.date()}, "
-                f"antes de lo que cubre el plan ({limite.date()}).")
+                UserWarning, stacklevel=2)
+            desde = limite
         desde, hasta = desde.strftime("%Y-%m-%d"), hasta.strftime("%Y-%m-%d")
 
         time.sleep(self.pausa)

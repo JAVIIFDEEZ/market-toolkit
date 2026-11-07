@@ -12,6 +12,8 @@ class Portfolio:
     """
     Clase que modela una cartera de inversión.
     """
+    TOLERANCIA_PESOS = 1e-6  # Margen para considerar que los pesos de una fecha suman 1
+
     activos: pd.DataFrame
     pesos: pd.DataFrame
     info: pd.DataFrame
@@ -40,13 +42,30 @@ class Portfolio:
         self.info.columns.name = None
         self.info.index.name = "Información"
         # Validar pesos
-        if len(pesos.columns) != len(activos):
-            raise ValueError("La cantidad de pesos debe coincidir con en número de activos.")
+        if not isinstance(pesos.index, pd.DatetimeIndex):
+            raise ValueError("El índice de los pesos debe ser un DatetimeIndex.")
+        # Cada peso se empareja con su activo por nombre, no por posición
+        faltan = sorted(set(self.activos.columns) - set(pesos.columns))
+        sobran = sorted(set(pesos.columns) - set(self.activos.columns))
+        if faltan or sobran:
+            raise ValueError(
+                f"Las columnas de los pesos deben ser los activos de la cartera. "
+                f"Faltan: {faltan or 'ninguno'}. Sobran: {sobran or 'ninguno'}.")
+        pesos = pesos[list(self.activos.columns)].sort_index()  # Mismo orden que los activos
         pesos = pesos.dropna()  # Nos quedamos SOLO cuando todos los pesos son validos.
         if pesos.empty:
             raise ValueError("No se han proporcionado pesos válidos.")
-        # Pesos de los activos
-        self.pesos = pesos.asfreq("D").ffill()
+        sumas = pesos.sum(axis=1)
+        incorrectas = sumas[(sumas - 1).abs() > self.TOLERANCIA_PESOS]
+        if not incorrectas.empty:
+            raise ValueError(
+                f"Los pesos de cada fecha deben sumar 1. El {incorrectas.index[0].date()} "
+                f"suman {incorrectas.iloc[0]:.4f}.")
+        # Pesos de los activos. Cada fila se mantiene hasta el siguiente cambio: se añaden las
+        # fechas de los activos desde el primer peso para que unos pesos fijos (una sola fila)
+        # se extiendan a todo el periodo de la cartera
+        fechas_activos = self.activos.index[self.activos.index >= pesos.index[0]]
+        self.pesos = pesos.reindex(pesos.index.union(fechas_activos)).ffill()
         # Ajuste temporal entre los pesos y los activos
         if self.pesos.index[0] < self.activos.index[0]:
             warnings.warn(

@@ -49,8 +49,9 @@ La API key también se puede pasar como argumento: `PolygonProvider(["AAPL"], ap
 
 ```python
 series = polygon.download()                                   # Últimos 2 años (por defecto)
-series = polygon.download(periodo="6mo")                      # "3mo", "6mo", "1y" o "2y"
+series = polygon.download(periodo="6mo")                      # "3mo", "6mo", "1y", "2y" o "max"
 series = polygon.download(inicio="2025-01-01", fin="2025-06-30")
+series = polygon.download(fin="2026-01-01", periodo="6mo")    # Del 2025-07-01 al 2026-01-01
 
 for s in polygon.download():
     print(s.activo, s.tipo, s.proveedor, s.inicio, s.fin, s.observaciones)
@@ -67,6 +68,11 @@ MSFT acción Polygon 2024-11-04 2026-11-02 500
 | `download(periodo="6mo")` | 2026-05-06 → 2026-11-02, 125 sesiones |
 | `download(inicio="2025-01-01", fin="2025-06-30")` | 2025-01-02 → 2025-06-30, 122 sesiones |
 | `download(inicio="2015-01-01")` | Se recorta a 2024-11-04 y avisa: `UserWarning: El plan de Polygon solo cubre desde 2024-11-04. Se recorta la fecha de inicio 2015-01-01.` |
+| `download(inicio="2015-01-01", fin="2016-01-01")` | `ValueError`: el rango termina antes de lo que cubre el plan |
+| `download(periodo="1mo")` | `ValueError` al momento, sin llamar a la API: periodo no válido |
+
+Si solo se indica `inicio` o `fin`, `periodo` calcula la otra fecha; con las dos fechas, se
+ignora.
 
 #### Trabajar con una serie
 
@@ -194,8 +200,9 @@ MacroProvider object series<CLVMNACSCAB1GQES, T10Y2Y, CP0000EZ19M086NEST, DGS10>
 
 ```python
 series = macro.download()                                     # Todo el histórico
-series = macro.download(periodo="5y")                         # "max" o "<n>mo" / "<n>y"
+series = macro.download(periodo="5y")                         # "max", "<n>d", "<n>mo" o "<n>y"
 series = macro.download(inicio="2024-01-01")
+series = macro.download(inicio="2020-01-01", periodo="1y")    # Del 2020-01-01 al 2021-01-01
 
 for s in macro.download(inicio="2024-01-01"):
     print(s.serie_temporal.name, s.nombre, s.unidad, s.observaciones)
