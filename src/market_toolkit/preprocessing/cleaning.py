@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING, Literal
 
 import numpy as np
 import pandas as pd
+import yfinance
 
 if TYPE_CHECKING:
     from market_toolkit.models import FinancialSeries
@@ -89,7 +90,8 @@ def juntar_series(
         alineacion_temporal: Literal["relleno", "eliminacion"] | None = None
 ) -> pd.DataFrame:
     """
-    Función para juntar series temporales con gestión de la alineación temporal.
+    Función para juntar las rentabilidades de series temporales con gestión de la alineación
+    temporal.
     :param series: Lista de series temporales a juntar.
     :param permitir_negativos: `True` para conservar los valores negativos, que son válidos en
         series macroeconómicas (tipos de interés, spreads, variaciones...).
@@ -99,6 +101,37 @@ def juntar_series(
     :return: Dataframe con los datos juntos, limpios y alineados temporalmente.
     """
     df_series = pd.concat([serie.serie_temporal for serie in series], axis=1)
-    return limpiar_dataframe(df_series, permitir_negativos, alineacion_temporal)
-
-
+    df_series = limpiar_dataframe(df_series, permitir_negativos, alineacion_temporal)
+    # Pasar moneda a USD
+    monedas_activos = pd.Series({
+        serie.serie_temporal.name: serie.moneda
+        for serie in series
+    })
+    monedas = set(monedas_activos.unique()) - {"USD"}
+    tickers_fx = [f"{moneda}USD=X" for moneda in monedas]
+    if tickers_fx:
+        datos_fx = yfinance.download(
+            tickers=tickers_fx,
+            start=df_series.index.min() - pd.Timedelta(days=7),
+            end=df_series.index.max() + pd.Timedelta(days=1),
+            progress=False,
+        )
+        df_fx = datos_fx["Close"]
+        if isinstance(df_fx, pd.Series):
+            df_fx = df_fx.to_frame(name=tickers_fx[0])
+        df_fx.index = df_fx.index.tz_localize(None).normalize()
+        df_fx = df_fx.sort_index()
+        df_fx = df_fx.reindex(df_series.index, method="ffill")
+        factores = pd.DataFrame(
+            {
+                activo: (
+                    df_fx[f"{moneda}USD=X"]
+                    if moneda != "USD"
+                    else 1.0
+                )
+                for activo, moneda in monedas_activos.items()
+            },
+            index=df_series.index,
+        )
+        df_series *= factores
+    return df_series

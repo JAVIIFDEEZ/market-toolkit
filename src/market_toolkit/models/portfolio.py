@@ -1,11 +1,18 @@
+from __future__ import annotations
 import warnings
-from collections.abc import Sequence
-from typing import Literal
+from collections.abc import Sequence, Mapping
+from typing import TYPE_CHECKING, Literal
 
+import numpy as np
 import pandas as pd
 
-from market_toolkit.models import FinancialSeries
+from market_toolkit.config import DIAS_COTIZACION_ANUAL
+from market_toolkit.exceptions import InsufficientDataError
 from market_toolkit.preprocessing import juntar_series
+import market_toolkit.models.montecarlo as montecarlo
+
+if TYPE_CHECKING:
+    from  market_toolkit.models.series import FinancialSeries
 
 
 class Portfolio:
@@ -16,11 +23,15 @@ class Portfolio:
 
     activos: pd.DataFrame
     pesos: pd.DataFrame
-    info: pd.DataFrame
+    metadatos_activos: pd.DataFrame
     metadatos: dict
+    rentabilidad_media: float
+    desviacion_tipica: float
+    rentabilidad_anualizada: float
+    volatilidad_anualizada: float
 
     def __init__(self, activos: Sequence[FinancialSeries], pesos: pd.DataFrame, *,
-                 alineacion_temporal: Literal["relleno", "eliminacion"] | None = None):
+                 alineacion_temporal: Literal["relleno", "eliminacion"] = "eliminacion"):
         """
         Inicializa un objeto de Portfolio.
         :param activos: Lista con las series temporales que forman la cartera.
@@ -34,13 +45,11 @@ class Portfolio:
             dataframe.
         """
         # Juntar activos
-        self.activos = juntar_series(activos, alineacion_temporal=alineacion_temporal)
-        # Juntar la informacion
-        self.info = pd.DataFrame(
-            [activo.resumen() for activo in activos]
-        ).set_index("activo").T
-        self.info.columns.name = None
-        self.info.index.name = "Información"
+        self.activos = juntar_series(activos, True, alineacion_temporal)
+        # Informacion de cada activo
+        self.metadatos_activos = self._calcular_metadatos_activos(activos)
+        self.metadatos_activos.columns.name = None
+        self.metadatos_activos.index.name = "Información"
         # Validar pesos
         if not isinstance(pesos.index, pd.DatetimeIndex):
             raise ValueError("El índice de los pesos debe ser un DatetimeIndex.")
@@ -95,3 +104,81 @@ class Portfolio:
             self.pesos = self.pesos.reindex(self.activos.index).ffill()
         # Metadatos de los activos
         self.metadatos = {activo.activo: activo.metadatos for activo in activos}
+        # Calcular estadisticos
+        self._calcular_estadisticos()
+
+    def _calcular_metadatos_activos(self, activos: Sequence[FinancialSeries]) -> pd.DataFrame:
+        """
+        Recalcula los metadatos de los activos que forman la cartera tras la alineacion temporal.
+        :param activos: Lista de series temporales de la cartera.
+        :return: DataFrame en el que cada columna es un activo y cada fila un metadato
+        """
+        info = pd.DataFrame(
+            [activo.resumen() for activo in activos]
+        ).set_index("activo").T
+        rentabilidades = self.activos.pct_change()
+        medias = rentabilidades.mean()
+        desviaciones = rentabilidades.std()
+        rentabilidades_anual = (1 + medias) ** DIAS_COTIZACION_ANUAL - 1
+        volatilidades_anual = desviaciones * np.sqrt(DIAS_COTIZACION_ANUAL)
+        info.loc["moneda"] = "USD"
+        info.loc["inicio"] = self.activos.index[0].date()
+        info.loc["fin"] = self.activos.index[-1].date()
+        info.loc["observaciones"] = len(self.activos)
+        info.loc["media_diaria"] = medias
+        info.loc["desviacion_tipica_diaria"] = desviaciones
+        info.loc["rentabilidad_anualizada"] = rentabilidades_anual
+        info.loc["volatilidad_anualizada"] = volatilidades_anual
+        return info
+
+    def _calcular_estadisticos(self):
+        """
+        Determina distintos estadísticos de la cartera, como la rentabilidad media diaria, la
+        volatilidad, la rentabilidad media anualizada y la volatilidad anualizada.
+        """
+        rendimientos = (self.activos * self.pesos).sum(axis=1).pct_change()
+        if len(rendimientos) < 2:
+            raise InsufficientDataError(
+                "La cartera no tiene suficientes fechas con precios de sus activos para "
+                "calcular sus estadísticos.")
+        self.rentabilidad_media = float(rendimientos.mean())
+        self.desviacion_tipica = float(rendimientos.std())
+        self.rentabilidad_anualizada = (1 + self.rentabilidad_media) ** DIAS_COTIZACION_ANUAL - 1
+        self.volatilidad_anualizada = self.desviacion_tipica * np.sqrt(DIAS_COTIZACION_ANUAL)
+
+    def simulacion_monte_carlo(self, n_simulaciones: int = 1000,
+             horizonte: int = DIAS_COTIZACION_ANUAL,
+             rentabilidad: float | int | Mapping[str, float | int] | None = None,
+             volatilidad: float | int | Mapping[str, float | int] | None = None,
+             valor_inicial: float | int | None = None,
+             rebalanceo: bool = True,
+             semilla: int | None = None,
+             guardar_graficos: bool = True):
+        """
+        Realiza el algoritmo de simulación de montecarlo sobre la cartera.
+        :param n_simulaciones: Número de trayectorias (iteraciones) a simular.
+        :param horizonte: Número de sesiones bursátiles a simular (252 = un año).
+        :param rentabilidad: Rentabilidad anual esperada en tanto por uno (0.07 = 7 %). Si es
+            `None` se usa la histórica. En una cartera puede ser un número (el mismo para todos
+            los activos) o un diccionario {activo: rentabilidad} para cambiar solo algunos.
+        :param volatilidad: Volatilidad anual en tanto por uno (0.20 = 20 %). Mismas opciones que
+            `rentabilidad`.
+        :param valor_inicial: Valor de partida. Por defecto, el último precio del activo o 100
+            para una cartera.
+        :param rebalanceo: Solo para carteras. `True` para mantener los pesos constantes cada
+            día (rebalanceo diario) y `False` para comprar al inicio y no tocar la cartera.
+        :param semilla: Semilla del generador aleatorio, para obtener resultados reproducibles.
+        :param guardar_graficos: `True` para borrar los gráficos de la simulación anterior y
+            guardar los de esta en `models/graficos/` (trayectorias.png y distribucion.png).
+        """
+        sim = montecarlo.MonteCarlo(self,
+                                    n_simulaciones=n_simulaciones,
+                                    horizonte=horizonte,
+                                    rentabilidad=rentabilidad,
+                                    volatilidad=volatilidad,
+                                    valor_inicial=valor_inicial,
+                                    rebalanceo=rebalanceo,
+                                    semilla=semilla,
+                                    guardar_graficos=guardar_graficos
+        )
+        sim.graficar()
