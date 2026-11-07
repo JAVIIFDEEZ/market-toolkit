@@ -118,7 +118,9 @@ class MonteCarlo:
             self.pesos = None
             por_defecto = float(objetivo.serie_temporal.iloc[-1])
         else:
-            precios = objetivo.activos.dropna()  # Solo las fechas en las que cotizan todos
+            # Mismo calendario que Portfolio.rendimientos(): los días en que un activo no cotiza
+            # se toma su último precio y se descartan las fechas anteriores a que existan todos
+            precios = objetivo.activos.ffill().dropna()
             historicas, vol_historicas = self._estadisticos_historicos(precios)
             # Pesos actuales de la cartera (última fila), emparejados por nombre con los precios
             self.pesos = objetivo.pesos.iloc[-1].reindex(precios.columns).astype(float)
