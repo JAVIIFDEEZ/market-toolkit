@@ -2,15 +2,19 @@ import warnings
 from collections.abc import Sequence
 from typing import Literal
 
+import numpy as np
 import pandas as pd
 
+from market_toolkit.config import DIAS_COTIZACION_ANUAL
+from market_toolkit.exceptions import InsufficientDataError
 from market_toolkit.models import FinancialSeries
 from market_toolkit.preprocessing import juntar_series
 
 
 class Portfolio:
     """
-    Clase que modela una cartera de inversión.
+    Clase que modela una cartera de inversión. La cartera se rebalancea cada día: los pesos
+    vigentes se cumplen en todas las sesiones, hasta que se definen unos pesos nuevos.
     """
     TOLERANCIA_PESOS = 1e-6  # Margen para considerar que los pesos de una fecha suman 1
 
@@ -18,6 +22,10 @@ class Portfolio:
     pesos: pd.DataFrame
     info: pd.DataFrame
     metadatos: dict
+    rentabilidad_media: float
+    desviacion_tipica: float
+    rentabilidad_anualizada: float
+    volatilidad_anualizada: float
 
     def __init__(self, activos: Sequence[FinancialSeries], pesos: pd.DataFrame, *,
                  alineacion_temporal: Literal["relleno", "eliminacion"] | None = None):
@@ -95,3 +103,70 @@ class Portfolio:
             self.pesos = self.pesos.reindex(self.activos.index).ffill()
         # Metadatos de los activos
         self.metadatos = {activo.activo: activo.metadatos for activo in activos}
+        # Estadísticos de la cartera, calculados automáticamente al crearla
+        self._calcular_estadisticos()
+
+    def rendimientos(self, tipo: Literal["simple", "log"] = "simple") -> pd.Series:
+        """
+        Calcula los rendimientos diarios de la cartera con rebalanceo diario: la suma de los
+        rendimientos diarios de cada activo ponderados con los pesos vigentes al cierre de la
+        sesión anterior (al cierre de cada sesión la cartera se reajusta a esos pesos, que se
+        aplican a la sesión siguiente).
+        Los días en que un activo no cotiza se toma su último precio conocido (rendimiento 0) y
+        se descartan las fechas en las que algún activo con peso aún no tenía precio.
+        :param tipo: `"simple"` para rendimientos aritméticos y `"log"` para logarítmicos.
+        :return: Serie con los rendimientos diarios de la cartera.
+        """
+        precios = self.activos.ffill()
+        rendimientos_activos = precios.pct_change(fill_method=None)
+        pesos = self.pesos.reindex(precios.index).ffill().shift(1)
+        # Un activo sin peso no aporta nada aunque aún no tenga precio
+        contribuciones = (rendimientos_activos * pesos).mask(pesos == 0, 0.0)
+        cartera = contribuciones.dropna(how="any").sum(axis=1).rename("cartera")
+        if tipo == "simple":
+            return cartera
+        if tipo == "log":
+            return np.log1p(cartera)
+        raise ValueError(f"Tipo de rendimiento no válido: {tipo}. Usa 'simple' o 'log'.")
+
+    def valor(self, valor_inicial: float = 100.0) -> pd.Series:
+        """
+        Calcula la evolución del valor de la cartera a partir de sus rendimientos diarios.
+        :param valor_inicial: Valor de la cartera el día anterior al primer rendimiento.
+        :return: Serie con el valor de la cartera en cada sesión.
+        """
+        rendimientos = self.rendimientos()
+        inicio = self.activos.index[self.activos.index < rendimientos.index[0]][-1]
+        valores = valor_inicial * (1 + rendimientos).cumprod()
+        return pd.concat([pd.Series({inicio: float(valor_inicial)}), valores]).rename("cartera")
+
+    def _calcular_estadisticos(self) -> None:
+        """Calcula los estadísticos de los rendimientos diarios de la cartera."""
+        rendimientos = self.rendimientos()
+        if len(rendimientos) < 2:
+            raise InsufficientDataError(
+                "La cartera no tiene suficientes fechas con precios de sus activos para "
+                "calcular sus estadísticos.")
+        self.rentabilidad_media = float(rendimientos.mean())
+        self.desviacion_tipica = float(rendimientos.std())
+        # Igual que en FinancialSeries: rentabilidad compuesta y volatilidad por la regla de la raíz
+        self.rentabilidad_anualizada = (1 + self.rentabilidad_media) ** DIAS_COTIZACION_ANUAL - 1
+        self.volatilidad_anualizada = float(self.desviacion_tipica * np.sqrt(DIAS_COTIZACION_ANUAL))
+
+    def resumen(self) -> dict:
+        """
+        Devuelve la información principal de la cartera y sus estadísticos.
+        :return: Diccionario con los activos, los pesos actuales y los estadísticos de la cartera.
+        """
+        rendimientos = self.rendimientos()
+        return {
+            "activos": list(self.activos.columns),
+            "pesos_actuales": self.pesos.iloc[-1].to_dict(),
+            "inicio": rendimientos.index[0].date(),
+            "fin": rendimientos.index[-1].date(),
+            "observaciones": len(rendimientos),
+            "media_diaria": self.rentabilidad_media,
+            "desviacion_tipica_diaria": self.desviacion_tipica,
+            "rentabilidad_anualizada": self.rentabilidad_anualizada,
+            "volatilidad_anualizada": self.volatilidad_anualizada,
+        }
