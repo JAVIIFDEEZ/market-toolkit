@@ -132,9 +132,12 @@ def juntar_series(
         if isinstance(df_fx, pd.Series):
             df_fx = df_fx.to_frame(name=tickers_fx[0])
         df_fx.index = df_fx.index.tz_localize(None).normalize()
-        df_fx = df_fx.sort_index()
+        # Los días sin tipo de cambio usan el último conocido, también si la fecha viene vacía
+        df_fx = df_fx.reindex(columns=tickers_fx).sort_index().ffill()
         df_fx = df_fx.reindex(df_series.index, method="ffill")
-
+        sin_cambio = df_fx.columns[df_fx.isna().any()].tolist()
+        if sin_cambio:
+            raise ValueError(f"Faltan tipos de cambio para convertir a USD: {sin_cambio}.")
         factores = pd.DataFrame(
             {
                 activo: (

@@ -18,7 +18,8 @@ dependencies = [
   "curl_cffi",         # CSV de FRED con impersonate="chrome", sin clave
   "python-dotenv",
   "massive", 
-  "fredapi"
+  "fredapi",
+  "urllib3"
 ]
 
 [project.optional-dependencies]

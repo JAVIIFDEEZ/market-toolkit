@@ -66,7 +66,7 @@ class MonteCarlo:
         rentabilidad: Supuesto = None,
         volatilidad: Supuesto = None,
         valor_inicial: float | None = None,
-        rebalanceo: bool = True,
+        rebalanceo: bool = False,
         semilla: int | None = None,
         guardar_graficos: bool = True,
     ) -> None:
@@ -82,8 +82,8 @@ class MonteCarlo:
             `rentabilidad`.
         :param valor_inicial: Valor de partida. Por defecto, el último precio del activo o 100
             para una cartera.
-        :param rebalanceo: Solo para carteras. `True` para mantener los pesos constantes cada
-            día (rebalanceo diario) y `False` para comprar al inicio y no tocar la cartera.
+        :param rebalanceo: Solo para carteras. `False` (por defecto) para comprar al inicio y no
+            tocar la cartera y `True` para mantener los pesos constantes cada día.
         :param semilla: Semilla del generador aleatorio, para obtener resultados reproducibles.
         :param guardar_graficos: `True` para borrar los gráficos de la simulación anterior y
             guardar los de esta en `models/graficos/` (trayectorias.png y distribucion.png).
@@ -110,10 +110,10 @@ class MonteCarlo:
             self.pesos = None
             por_defecto = float(objetivo.serie_temporal.iloc[-1])
         else:
-            precios = objetivo.activos.dropna()
+            precios = objetivo.precio_activos.dropna()
             historicas = objetivo.metadatos_activos.loc["rentabilidad_anualizada"]
             vol_historicas = objetivo.metadatos_activos.loc["volatilidad_anualizada"]
-            self.pesos = objetivo.pesos.iloc[-1]  # Pesos actuales de la cartera
+            self.pesos = objetivo.pesos_actuales  # Pesos al cierre de la última sesión
             por_defecto = 100.0
         self.rentabilidades = self._aplicar_supuesto(historicas, rentabilidad, "rentabilidad")
         self.volatilidades = self._aplicar_supuesto(vol_historicas, volatilidad, "volatilidad")
