@@ -7,7 +7,8 @@ import numpy as np  # noqa: E402
 import pandas as pd  # noqa: E402
 import pytest  # noqa: E402
 
-from market_toolkit.models import FinancialSeries, MonteCarlo, TipoActivo  # noqa: E402
+from market_toolkit.models import FinancialSeries, TipoActivo  # noqa: E402
+from market_toolkit.simulation import MonteCarlo  # noqa: E402
 
 
 @pytest.fixture

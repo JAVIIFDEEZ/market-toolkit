@@ -12,10 +12,12 @@ from market_toolkit.models import Portfolio  # noqa: E402
 
 SECCIONES = [
     "# Informe de cartera",
-    "## Resumen",
-    "## Métricas",
-    "## Pesos actuales",
-    "## Diagnosticos y advertencias",
+    "## Información general",
+    "### Composición por activo",
+    "## Rentabilidad",
+    "## Riesgo",
+    "## Diversificación y concentración",
+    "## Diagnósticos y advertencias",
 ]
 GRAFICOS = ["evolucion", "drawdown", "pesos", "riesgo_rentabilidad", "contribucion", "correlacion"]
 
@@ -69,13 +71,13 @@ def test_report_sin_advertencias(activos_usd, fechas_laborables):
 def test_report_advierte_de_volatilidad_y_drawdown(cartera):
     informe = cartera.report(max_volatilidad=0, max_drawdown=0)
     assert "La volatilidad anualizada" in informe
-    assert "El drawdown maximo" in informe
+    assert "El drawdown máximo" in informe
 
 
 def test_report_advierte_de_concentracion(activos_usd, fechas_laborables):
     pesos = pd.DataFrame({"AAA": [0.8], "BBB": [0.1], "CCC": [0.1]}, index=[fechas_laborables[0]])
     informe = Portfolio(activos_usd, pesos).report(max_volatilidad=10, max_drawdown=10)
-    assert "Concentracion elevada en **AAA**" in informe
+    assert "Concentración elevada en **AAA**" in informe
 
 
 @pytest.mark.parametrize(

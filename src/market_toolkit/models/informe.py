@@ -6,7 +6,7 @@ import pandas as pd
 from matplotlib.figure import Figure
 from matplotlib.ticker import FuncFormatter
 
-import market_toolkit.models.montecarlo as montecarlo
+import market_toolkit.simulation.montecarlo as montecarlo
 
 # Colores de identidad de los activos, en orden fijo. A partir del octavo activo, los de menor
 # peso medio se agrupan en "Otros" para que no haya colores indistinguibles

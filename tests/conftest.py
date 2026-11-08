@@ -66,8 +66,7 @@ def precios_calendarios_distintos(fechas_laborables: pd.DatetimeIndex) -> pd.Dat
 @pytest.fixture(autouse=True)
 def carpeta_graficos_temporal(tmp_path, monkeypatch):
     """Los gráficos que se guardan durante los tests van a una carpeta temporal, no al repo."""
-    import market_toolkit.models.montecarlo as montecarlo
-
+    import market_toolkit.simulation.montecarlo as montecarlo
     monkeypatch.setattr(montecarlo, "CARPETA_GRAFICOS", tmp_path / "graficos")
 
 
