@@ -225,3 +225,10 @@ data/cache/
 outputs/
 .vscode/
 .idea/
+
+
+# Gráficos generados por las simulaciones de Monte Carlo
+src/market_toolkit/models/graficos/
+
+# Scripts locales de validación
+validacion/
