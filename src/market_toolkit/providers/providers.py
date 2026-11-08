@@ -680,7 +680,7 @@ class AlphaVantageProvider(Provider):
         :param api_key: Key persoal para acceder a la API. Si no se proporciona se busca en
         el entorno o se pide por pantalla.
         """
-        self.api_key = _resolver_api_key(api_key, config.ALPHAVANTAGE_API_KEY, "Polygon")
+        self.api_key = _resolver_api_key(api_key, config.ALPHAVANTAGE_API_KEY, "Alpha Vantage")
         self.pausa = pausa
         super().__init__(tickers)
 
