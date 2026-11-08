@@ -316,8 +316,12 @@ ganar, qué probabilidad hay de perder y cuánto se puede perder en los peores e
 ```python
 from market_toolkit.models.montecarlo import MonteCarlo
 
-mc = MonteCarlo(aapl, n_simulaciones=5000, horizonte=252, semilla=42)   # Un activo
-mc = MonteCarlo(cartera, horizonte=504, rentabilidad={"MSFT": 0.05})   # Una cartera
+# Un activo: se crea el objeto MonteCarlo con la FinancialSeries
+mc = MonteCarlo(aapl, n_simulaciones=5000, horizonte=252, semilla=42)
+mc.resumen()
+
+# Una cartera: se llama al método de Portfolio, que devuelve el MonteCarlo y muestra los gráficos
+mc = cartera.simulacion_monte_carlo(horizonte=504, rentabilidad={"MSFT": 0.05}, rebalanceo=False)
 mc.resumen()
 ```
 
@@ -335,8 +339,22 @@ diario **aleatorio**, sacado de una distribución normal (gaussiana). Repitiendo
 | Volatilidad anual `σ` | `desviación típica de los rendimientos diarios × √252` |
 
 En un activo son los mismos estadísticos que ya calcula `FinancialSeries` al crearse. En una
-cartera se calculan para cada activo sobre las fechas en las que cotizan todos. También se pueden
-fijar a mano: `rentabilidad=0.08, volatilidad=0.20` (8 % y 20 % anual).
+cartera se calculan para cada activo sobre las fechas en las que cotizan todos.
+
+**La media y la volatilidad se pueden cambiar libremente.** El histórico solo se usa si no se
+indica otra cosa:
+
+```python
+MonteCarlo(aapl, rentabilidad=0.08, volatilidad=0.20)   # 8 % y 20 % anual
+
+# En una cartera, el mismo valor para todos los activos...
+cartera.simulacion_monte_carlo(rentabilidad=0.08, volatilidad=0.20)
+# ...o un valor por activo: los que no se indiquen mantienen su histórico
+cartera.simulacion_monte_carlo(rentabilidad={"MSFT": 0.05}, volatilidad={"AAPL": 0.30})
+```
+
+Los valores son por activo, así que `volatilidad=0.20` no significa que la cartera tenga un 20 %:
+por la diversificación suele ser menor. Las correlaciones siempre son las históricas.
 
 **2. Paso a diario.** Los supuestos anuales se convierten a un día (252 sesiones al año):
 
@@ -351,10 +369,11 @@ fijar a mano: `rentabilidad=0.08, volatilidad=0.20` (8 % y 20 % anual).
 
 **En una cartera**, los activos se simulan a la vez y sus movimientos diarios mantienen las
 **correlaciones históricas** entre ellos (si dos activos suelen subir juntos, en la simulación
-también). Después se combinan con los **pesos actuales** de la cartera:
+también). Después se combinan con los **pesos actuales** de la cartera. El **rebalanceo es un
+parámetro libre**:
 
-- `rebalanceo=True` (por defecto): los pesos se mantienen constantes cada día.
-- `rebalanceo=False`: se compra al inicio y no se toca la cartera.
+- `rebalanceo=True` (por defecto): los pesos se cumplen todos los días.
+- `rebalanceo=False`: se compra al inicio con esos pesos y no se toca la cartera.
 
 ### Parámetros
 
@@ -362,9 +381,9 @@ también). Después se combinan con los **pesos actuales** de la cartera:
 |---|---|---|
 | `n_simulaciones` | Número de caminos simulados | 1000 |
 | `horizonte` | Sesiones a simular (252 = un año) | 252 |
-| `rentabilidad`, `volatilidad` | Supuestos anuales. En una cartera, un número para todos los activos o un diccionario por activo | Históricos |
+| `rentabilidad`, `volatilidad` | Media y volatilidad anuales, a elección del usuario. En una cartera, un número para todos los activos o un diccionario por activo | Históricas |
 | `valor_inicial` | Valor de partida | Último precio del activo, o 100 en una cartera |
-| `rebalanceo` | Solo carteras: pesos constantes o comprar y mantener | `True` |
+| `rebalanceo` | Solo carteras, a elección del usuario: `True` cumple los pesos cada día y `False` compra y mantiene | `True` |
 | `semilla` | Fija el azar para obtener siempre el mismo resultado | `None` |
 | `guardar_graficos` | Guarda los gráficos de la simulación | `True` |
 
@@ -387,11 +406,11 @@ mc_activo = MonteCarlo(
 
 
 # Los resultados también se pueden ajustar
-mc_cartera.percentiles((1, 10, 50, 90, 99))   # Percentiles a elección en cada sesión
-mc_cartera.var(0.99)                           # VaR con otra confianza
-mc_cartera.cvar(0.99)                          # CVaR con otra confianza
-mc_cartera.graficar(n_trayectorias=100)       # Mostrar por pantalla con 100 caminos de fondo
-mc_cartera.guardar_graficos(n_trayectorias=100, carpeta="mis_graficos")   # Guardar en otra carpeta
+mc_activo.percentiles((1, 10, 50, 90, 99))   # Percentiles a elección en cada sesión
+mc_activo.var(0.99)                          # VaR con otra confianza
+mc_activo.cvar(0.99)                         # CVaR con otra confianza
+mc_activo.graficar(n_trayectorias=100)       # Mostrar por pantalla con 100 caminos de fondo
+mc_activo.guardar_graficos(n_trayectorias=100, carpeta="mis_graficos")   # Guardar en otra carpeta
 ```
 
 ### Resultados

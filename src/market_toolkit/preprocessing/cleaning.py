@@ -10,6 +10,14 @@ import yfinance
 if TYPE_CHECKING:
     from market_toolkit.models import FinancialSeries
 
+# Monedas que Yahoo Finance da en centésimas: {subunidad: (moneda principal, valor en esa moneda)}
+SUBUNIDADES_MONEDA = {
+    "GBp": ("GBP", 0.01),
+    "GBX": ("GBP", 0.01),
+    "ZAc": ("ZAR", 0.01),
+    "ILA": ("ILS", 0.01),
+}
+
 
 def limpiar_datos(
     datos: pd.DataFrame | pd.Series,
@@ -107,8 +115,12 @@ def juntar_series(
         serie.serie_temporal.name: serie.moneda
         for serie in series
     })
-    monedas = set(monedas_activos.unique()) - {"USD"}
-    tickers_fx = [f"{moneda}USD=X" for moneda in monedas]
+    # Cada moneda se cambia desde su moneda principal, ajustando la escala de las subunidades
+    conversiones = {
+        moneda: SUBUNIDADES_MONEDA.get(moneda, (moneda, 1.0))
+        for moneda in set(monedas_activos.unique()) - {"USD"}
+    }
+    tickers_fx = sorted({f"{principal}USD=X" for principal, _ in conversiones.values()})
     if tickers_fx:
         datos_fx = yfinance.download(
             tickers=tickers_fx,
@@ -125,7 +137,7 @@ def juntar_series(
         factores = pd.DataFrame(
             {
                 activo: (
-                    df_fx[f"{moneda}USD=X"]
+                    df_fx[f"{conversiones[moneda][0]}USD=X"] * conversiones[moneda][1]
                     if moneda != "USD"
                     else 1.0
                 )

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 import matplotlib.dates as mdates
 import matplotlib.pyplot as plt
@@ -13,10 +12,6 @@ from matplotlib.figure import Figure
 import market_toolkit.models.portfolio as portfolio
 import market_toolkit.models.series as series
 from market_toolkit.config import DIAS_COTIZACION_ANUAL
-
-if TYPE_CHECKING:
-    # Solo para las anotaciones: Portfolio usa MonteCarlo y un import real sería circular
-    from market_toolkit.models.portfolio import Portfolio
 
 Supuesto = float | Mapping[str, float] | None
 
@@ -279,16 +274,12 @@ class MonteCarlo:
     @property
     def _unidad(self) -> str:
         """
-        Unidad del valor simulado: la moneda del activo, la moneda común de los activos de la
-        cartera o, si no se conoce o la cartera mezcla monedas, "puntos".
+        Unidad del valor simulado: la moneda del activo o, si no se conoce, "puntos". Una cartera
+        siempre está en USD, porque `Portfolio` convierte a USD todos sus activos.
         """
         if self.pesos is None:
             return self.objetivo.moneda or "puntos"
-        info = getattr(self.objetivo, "info", None)
-        if not isinstance(info, pd.DataFrame) or "moneda" not in info.index:
-            return "puntos"
-        monedas = {moneda for moneda in info.loc["moneda"] if isinstance(moneda, str) and moneda}
-        return monedas.pop() if len(monedas) == 1 else "puntos"
+        return "USD"
 
     @property
     def _etiqueta_valor(self) -> str:
@@ -358,8 +349,9 @@ class MonteCarlo:
         eje.set_xlim(fechas[0], fechas[-1])
         eje.xaxis.set_major_formatter(mdates.ConciseDateFormatter(eje.xaxis.get_major_locator()))
         eje.set_ylabel(self._etiqueta_valor, color=COLORES["texto_secundario"])
+        activo = f"{self._nombre_objetivo} · " if self.pesos is None else ""
         eje.set_title(
-            f"Trayectorias simuladas · {self._nombre_objetivo} · "
+            f"Trayectorias simuladas · {activo}"
             f"{self.n_simulaciones:,} simulaciones, {self.horizonte} sesiones",
             loc="left", color=COLORES["texto"], fontsize=12)
         eje.legend(loc="upper left", frameon=False, fontsize=9,

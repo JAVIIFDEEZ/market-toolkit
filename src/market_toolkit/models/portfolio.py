@@ -40,17 +40,12 @@ class Portfolio:
             Debe tener un índice temporal y cada fila se corresponde con los pesos del día
             correspondiente. Si el índice no es diario, cada fila indica los pesos en la ventana
             temporal que empieza en esa fecha y termina en la fecha de la próxima fila.
-        :param alineacion_temporal: Establece cómo tratar los valores nulos causados por la
-            alineación temporal de los activos. `None` si no se desea hacer nada, `"relleno"` para
-            reemplazarlos por los valores anteriores y `"eliminacion"` para eliminar esas fechas del
-            dataframe.
+        :param alineacion_temporal: Establece cómo tratar las fechas en las que no cotizan todos
+            los activos. `"eliminacion"` (por defecto) elimina esas fechas y `"relleno"` usa el
+            último precio conocido de cada activo.
         """
         # Juntar activos
         self.activos = juntar_series(activos, True, alineacion_temporal)
-        # Informacion de cada activo
-        self.metadatos_activos = self._calcular_metadatos_activos(activos)
-        self.metadatos_activos.columns.name = None
-        self.metadatos_activos.index.name = "Información"
         # Validar pesos
         if not isinstance(pesos.index, pd.DatetimeIndex):
             raise ValueError("El índice de los pesos debe ser un DatetimeIndex.")
@@ -103,8 +98,12 @@ class Portfolio:
             self.pesos = self.pesos[:self.activos.index[-1]]
         elif self.pesos.index[-1] < self.activos.index[-1]:
             self.pesos = self.pesos.reindex(self.activos.index).ffill()
+        # Informacion de cada activo, sobre las fechas definitivas de la cartera
+        self.metadatos_activos = self._calcular_metadatos_activos(activos)
+        self.metadatos_activos.columns.name = None
+        self.metadatos_activos.index.name = "Información"
         # Metadatos de los activos
-        self.metadatos = {activo.activo: activo.metadatos for activo in activos}
+        self.metadatos ={activo.activo: activo.metadatos for activo in activos}
         # Calcular estadisticos
         self._calcular_estadisticos()
 
@@ -137,7 +136,11 @@ class Portfolio:
         Determina distintos estadísticos de la cartera, como la rentabilidad media diaria, la
         volatilidad, la rentabilidad media anualizada y la volatilidad anualizada.
         """
-        rendimientos = (self.activos * self.pesos).sum(axis=1).pct_change()
+        # Rendimiento de la cartera: rendimiento de cada activo por el peso que tenía el capital
+        # en él al cierre de la sesión anterior
+        rendimientos_activos = self.activos.pct_change(fill_method=None)
+        pesos = self.pesos.reindex(self.activos.index).ffill().shift(1)
+        rendimientos = (rendimientos_activos * pesos).dropna().sum(axis=1)
         if len(rendimientos) < 2:
             raise InsufficientDataError(
                 "La cartera no tiene suficientes fechas con precios de sus activos para "
@@ -147,6 +150,24 @@ class Portfolio:
         self.rentabilidad_anualizada = (1 + self.rentabilidad_media) ** DIAS_COTIZACION_ANUAL - 1
         self.volatilidad_anualizada = self.desviacion_tipica * np.sqrt(DIAS_COTIZACION_ANUAL)
 
+    def resumen(self) -> dict:
+        """
+        Devuelve la información principal de la cartera y sus estadísticos.
+        :return: Diccionario con los activos, los pesos actuales y los estadísticos de la cartera.
+        """
+        return {
+            "activos": list(self.activos.columns),
+            "pesos_actuales": self.pesos.iloc[-1].to_dict(),
+            "moneda": "USD",
+            "inicio": self.activos.index[0].date(),
+            "fin": self.activos.index[-1].date(),
+            "observaciones": len(self.activos),
+            "media_diaria": self.rentabilidad_media,
+            "desviacion_tipica_diaria": self.desviacion_tipica,
+            "rentabilidad_anualizada": self.rentabilidad_anualizada,
+            "volatilidad_anualizada": self.volatilidad_anualizada,
+        }
+
     def simulacion_monte_carlo(self, n_simulaciones: int = 1000,
              horizonte: int = DIAS_COTIZACION_ANUAL,
              rentabilidad: float | int | Mapping[str, float | int] | None = None,
@@ -154,7 +175,7 @@ class Portfolio:
              valor_inicial: float | int | None = None,
              rebalanceo: bool = True,
              semilla: int | None = None,
-             guardar_graficos: bool = True):
+             guardar_graficos: bool = True) -> montecarlo.MonteCarlo:
         """
         Realiza el algoritmo de simulación de montecarlo sobre la cartera.
         :param n_simulaciones: Número de trayectorias (iteraciones) a simular.
@@ -171,6 +192,7 @@ class Portfolio:
         :param semilla: Semilla del generador aleatorio, para obtener resultados reproducibles.
         :param guardar_graficos: `True` para borrar los gráficos de la simulación anterior y
             guardar los de esta en `models/graficos/` (trayectorias.png y distribucion.png).
+        :return: El objeto MonteCarlo con los resultados de la simulación.
         """
         sim = montecarlo.MonteCarlo(self,
                                     n_simulaciones=n_simulaciones,
@@ -183,3 +205,4 @@ class Portfolio:
                                     guardar_graficos=guardar_graficos
         )
         sim.graficar()
+        return sim
