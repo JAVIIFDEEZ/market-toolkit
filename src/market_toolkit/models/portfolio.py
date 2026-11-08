@@ -22,7 +22,8 @@ class Portfolio:
     """
     TOLERANCIA_PESOS = 1e-6  # Margen para considerar que los pesos de una fecha suman 1
 
-    activos: pd.DataFrame
+    precio_activos: pd.DataFrame
+    rendimiento: pd.Series
     pesos: pd.DataFrame
     metadatos_activos: pd.DataFrame
     metadatos: dict
@@ -45,18 +46,18 @@ class Portfolio:
             último precio conocido de cada activo.
         """
         # Juntar activos
-        self.activos = juntar_series(activos, True, alineacion_temporal)
+        self.precio_activos = juntar_series(activos, True, alineacion_temporal)
         # Validar pesos
         if not isinstance(pesos.index, pd.DatetimeIndex):
             raise ValueError("El índice de los pesos debe ser un DatetimeIndex.")
         # Cada peso se empareja con su activo por nombre, no por posición
-        faltan = sorted(set(self.activos.columns) - set(pesos.columns))
-        sobran = sorted(set(pesos.columns) - set(self.activos.columns))
+        faltan = sorted(set(self.precio_activos.columns) - set(pesos.columns))
+        sobran = sorted(set(pesos.columns) - set(self.precio_activos.columns))
         if faltan or sobran:
             raise ValueError(
                 f"Las columnas de los pesos deben ser los activos de la cartera. "
                 f"Faltan: {faltan or 'ninguno'}. Sobran: {sobran or 'ninguno'}.")
-        pesos = pesos[list(self.activos.columns)].sort_index()  # Mismo orden que los activos
+        pesos = pesos[list(self.precio_activos.columns)].sort_index()  # Mismo orden que los activos
         pesos = pesos.dropna()  # Nos quedamos SOLO cuando todos los pesos son validos.
         if pesos.empty:
             raise ValueError("No se han proporcionado pesos válidos.")
@@ -66,44 +67,48 @@ class Portfolio:
             raise ValueError(
                 f"Los pesos de cada fecha deben sumar 1. El {incorrectas.index[0].date()} "
                 f"suman {incorrectas.iloc[0]:.4f}.")
-        # Pesos de los activos. Cada fila se mantiene hasta el siguiente cambio: se añaden las
-        # fechas de los activos desde el primer peso para que unos pesos fijos (una sola fila)
-        # se extiendan a todo el periodo de la cartera
-        fechas_activos = self.activos.index[self.activos.index >= pesos.index[0]]
-        self.pesos = pesos.reindex(pesos.index.union(fechas_activos)).ffill()
         # Ajuste temporal entre los pesos y los activos
-        if self.pesos.index[0] < self.activos.index[0]:
+        fechas_activos = self.precio_activos.index[self.precio_activos.index >= pesos.index[0]]
+        pesos = pesos.reindex(pesos.index.union(fechas_activos))
+        if pesos.index[0] < self.precio_activos.index[0]:
             warnings.warn(
                 "Hay pesos configurados para antes de la existencia de algunos activos. "
                 "Se truncan para que el día de inicio coincida con el de los activos.",
                 UserWarning,
                 stacklevel=2,
             )
-            self.pesos = self.pesos[self.activos.index[0]:]
-        elif self.pesos.index[0] > self.activos.index[0]:
+            pesos = pesos[self.precio_activos.index[0]:]
+        elif pesos.index[0] > self.precio_activos.index[0]:
             warnings.warn(
                 "Hay activos configurados para antes de la existencia de los pesos. "
                 "Se truncan para que el día de inicio coincida con el de los pesos.",
                 UserWarning,
                 stacklevel=2,
             )
-            self.activos = self.activos[self.pesos.index[0]:]
-        if self.pesos.index[-1] > self.activos.index[-1]:
+            self.precio_activos = self.precio_activos[pesos.index[0]:]
+        if pesos.index[-1] > self.precio_activos.index[-1]:
             warnings.warn(
                 "Hay pesos configurados para después de la existencia de los activos. "
                 "Se truncan para que el día de fin coincida con el de los activos.",
                 UserWarning,
                 stacklevel=2,
             )
-            self.pesos = self.pesos[:self.activos.index[-1]]
-        elif self.pesos.index[-1] < self.activos.index[-1]:
-            self.pesos = self.pesos.reindex(self.activos.index).ffill()
+            pesos = pesos[:self.precio_activos.index[-1]]
+        elif pesos.index[-1] < self.precio_activos.index[-1]:
+            pesos = pesos.reindex(self.precio_activos.index).ffill()
         # Informacion de cada activo, sobre las fechas definitivas de la cartera
         self.metadatos_activos = self._calcular_metadatos_activos(activos)
         self.metadatos_activos.columns.name = None
         self.metadatos_activos.index.name = "Información"
+        # Pesos de los activos. Cada fila introducida por el usuario representa un rebalanceo de
+        # los pesos. Para el resto del tiempo, se simula la evolución de los pesos según las
+        # rentabilidades de los activos asociados.
+        self.pesos = self._calcular_pesos_activos(
+            pesos,
+            self.precio_activos.pct_change(fill_method=None)
+        )
         # Metadatos de los activos
-        self.metadatos ={activo.activo: activo.metadatos for activo in activos}
+        self.metadatos = {activo.activo: activo.metadatos for activo in activos}
         # Calcular estadisticos
         self._calcular_estadisticos()
 
@@ -116,20 +121,52 @@ class Portfolio:
         info = pd.DataFrame(
             [activo.resumen() for activo in activos]
         ).set_index("activo").T
-        rentabilidades = self.activos.pct_change()
+        rentabilidades = self.precio_activos.pct_change(fill_method=None)
         medias = rentabilidades.mean()
         desviaciones = rentabilidades.std()
         rentabilidades_anual = (1 + medias) ** DIAS_COTIZACION_ANUAL - 1
         volatilidades_anual = desviaciones * np.sqrt(DIAS_COTIZACION_ANUAL)
         info.loc["moneda"] = "USD"
-        info.loc["inicio"] = self.activos.index[0].date()
-        info.loc["fin"] = self.activos.index[-1].date()
-        info.loc["observaciones"] = len(self.activos)
+        info.loc["inicio"] = self.precio_activos.index[0].date()
+        info.loc["fin"] = self.precio_activos.index[-1].date()
+        info.loc["observaciones"] = len(self.precio_activos)
         info.loc["media_diaria"] = medias
         info.loc["desviacion_tipica_diaria"] = desviaciones
         info.loc["rentabilidad_anualizada"] = rentabilidades_anual
         info.loc["volatilidad_anualizada"] = volatilidades_anual
         return info
+
+    def _calcular_pesos_activos(
+            self,
+            pesos: pd.DataFrame,
+            rentabilidades: pd.DataFrame
+    ) -> pd.DataFrame:
+        """
+        Cálculo automatico de los pesos de la cartera en función de la evolución de sus activos
+        asociados.
+        :param pesos: Pesos con los rebalances introducidos con el usuaio. El resto de días son NaN.
+        :param rentabilidades: Rentabilidades de los activos asociados.
+        :return: Los pesos ajustados a los rendimientos de los activos
+        """
+        # Identificar fechas de rebalanceo
+        rebalanceo = pesos.notna().all(axis=1)
+        # Evolución acumulada de cada activo desde el último rebalanceo
+        factores = (1 + rentabilidades).groupby(rebalanceo.cumsum()).cumprod()
+        # Peso inicial de cada tramo
+        pesos_iniciales = pesos.where(rebalanceo).ffill()
+        # Evolución de los pesos
+        pesos_evolucionados = pesos_iniciales * factores
+        # Normalización para que sumen 1
+        pesos_evolucionados = pesos_evolucionados.div(
+            pesos_evolucionados.sum(axis=1),
+            axis=0
+        )
+        # Conservar los pesos objetivo en fechas de rebalanceo
+        pesos = pesos.where(
+            rebalanceo,
+            pesos_evolucionados
+        )
+        return pesos
 
     def _calcular_estadisticos(self):
         """
@@ -138,8 +175,8 @@ class Portfolio:
         """
         # Rendimiento de la cartera: rendimiento de cada activo por el peso que tenía el capital
         # en él al cierre de la sesión anterior
-        rendimientos_activos = self.activos.pct_change(fill_method=None)
-        pesos = self.pesos.reindex(self.activos.index).ffill().shift(1)
+        rendimientos_activos = self.precio_activos.pct_change(fill_method=None)
+        pesos = self.pesos.reindex(self.precio_activos.index).ffill().shift(1)
         rendimientos = (rendimientos_activos * pesos).dropna().sum(axis=1)
         if len(rendimientos) < 2:
             raise InsufficientDataError(
@@ -156,12 +193,12 @@ class Portfolio:
         :return: Diccionario con los activos, los pesos actuales y los estadísticos de la cartera.
         """
         return {
-            "activos": list(self.activos.columns),
+            "precio_activos": list(self.precio_activos.columns),
             "pesos_actuales": self.pesos.iloc[-1].to_dict(),
             "moneda": "USD",
-            "inicio": self.activos.index[0].date(),
-            "fin": self.activos.index[-1].date(),
-            "observaciones": len(self.activos),
+            "inicio": self.precio_activos.index[0].date(),
+            "fin": self.precio_activos.index[-1].date(),
+            "observaciones": len(self.precio_activos),
             "media_diaria": self.rentabilidad_media,
             "desviacion_tipica_diaria": self.desviacion_tipica,
             "rentabilidad_anualizada": self.rentabilidad_anualizada,
