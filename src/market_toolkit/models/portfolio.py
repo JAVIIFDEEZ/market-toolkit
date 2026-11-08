@@ -444,9 +444,8 @@ class Portfolio:
         if max_volatilidad < 0 or max_drawdown < 0:
             raise ValueError("Los umbrales de volatilidad y drawdown deben ser no negativos.")
 
-        rendimientos_activos = self.precio_activos.pct_change(fill_method=None)
-        pesos_anteriores = self.pesos.reindex(self.precio_activos.index).ffill().shift(1)
-        rendimientos = (rendimientos_activos * pesos_anteriores).dropna().sum(axis=1)
+        # Los mismos rendimientos con los que la cartera calcula sus estadísticos
+        rendimientos = self._rendimientos_cartera()
         crecimiento = (1 + rendimientos).cumprod()
         drawdowns = crecimiento.div(crecimiento.cummax()).sub(1)
         drawdown_maximo = float(-drawdowns.min())
@@ -459,7 +458,7 @@ class Portfolio:
                 exceso_diario.mean() / volatilidad_diaria * np.sqrt(DIAS_COTIZACION_ANUAL)
             )
 
-        pesos_actuales = self.pesos.iloc[-1]
+        pesos_actuales = self.pesos_actuales  # Pesos al cierre de la última sesión
         advertencias = []
         if self.volatilidad_anualizada > max_volatilidad:
             advertencias.append(
