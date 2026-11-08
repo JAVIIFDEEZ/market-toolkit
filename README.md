@@ -1,5 +1,264 @@
 # market-toolkit
-El proyecto consistes en la implementación de una toolkit para la extracción, análisis bursátil y gestión de  carteras
+
+[![CI](https://github.com/JAVIIFDEEZ/market-toolkit/actions/workflows/ci.yml/badge.svg)](https://github.com/JAVIIFDEEZ/market-toolkit/actions/workflows/ci.yml)
+![Python](https://img.shields.io/badge/python-3.11%2B-blue)
+
+Toolkit en Python para **descargar, estandarizar y analizar datos bursátiles** y **gestionar y
+simular carteras de inversión**. Taller B1-T1 del máster MIAX.
+
+- **Descarga multifuente:** Yahoo Finance (acciones e índices), Polygon (acciones), Alpha Vantage
+  (oro, plata y Brent) y FRED/ALFRED (series macroeconómicas). Todas las fuentes devuelven el
+  mismo tipo de objeto.
+- **Series validadas con estadísticos automáticos:** `FinancialSeries` y `MacroSeries` comprueban
+  los datos y calculan media, desviación típica, rentabilidad y volatilidad al crearse.
+- **Limpieza y alineación temporal** entre activos con calendarios distintos, con conversión a USD.
+- **Carteras** con pesos que pueden cambiar en el tiempo y que derivan entre rebalanceos.
+- **Simulación de Monte Carlo** de un activo o de una cartera, con las correlaciones entre activos.
+- **Informes:** `report()` en Markdown con métricas y advertencias de riesgo, y `plots_report()`
+  con seis gráficos.
+
+## Índice
+
+- [Requisitos](#requisitos)
+- [Instalación](#instalación)
+- [Configuración de las claves](#configuración-de-las-claves)
+- [Uso rápido](#uso-rápido)
+- [Demo](#demo)
+- [Tests](#tests)
+- [Arquitectura](#arquitectura)
+- [Estructura del proyecto](#estructura-del-proyecto)
+- [Guía de uso](#guía-de-uso)
+- [Autores](#autores)
+
+## Requisitos
+
+- **Python 3.11 o superior** ([descarga](https://www.python.org/downloads/)).
+- **git**.
+- Opcional: claves gratuitas de Polygon, Alpha Vantage y FRED. Yahoo Finance no necesita clave,
+  así que el toolkit funciona sin ninguna (ver [Configuración de las claves](#configuración-de-las-claves)).
+
+## Instalación
+
+**1. Clonar el repositorio**
+
+```bash
+git clone https://github.com/JAVIIFDEEZ/market-toolkit.git
+cd market-toolkit
+```
+
+**2. Crear y activar un entorno virtual**
+
+macOS y Linux:
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+```
+
+Windows (PowerShell):
+
+```powershell
+python -m venv .venv
+.venv\Scripts\Activate.ps1
+```
+
+> Si PowerShell no deja activar el entorno, ejecuta una vez
+> `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned` y vuelve a intentarlo.
+> En `cmd`, el comando es `.venv\Scripts\activate.bat`.
+
+**3. Instalar el paquete con las dependencias de desarrollo**
+
+```bash
+pip install -e ".[dev]"
+```
+
+El modo `-e` (editable) hace que los cambios en `src/` se usen sin reinstalar. `[dev]` añade
+`pytest`, `pytest-cov` y `ruff`.
+
+**4. Comprobar la instalación**
+
+```bash
+pytest
+```
+
+## Configuración de las claves
+
+Copia la plantilla `.env.example` como `.env` y rellena las claves que tengas:
+
+```bash
+cp .env.example .env        # macOS y Linux
+copy .env.example .env      # Windows
+```
+
+| Variable | Fuente | ¿Obligatoria? | Dónde conseguirla |
+| --- | --- | --- | --- |
+| — | Yahoo Finance | No necesita clave | — |
+| `POLYGON_API_KEY` | Polygon (Massive) | Solo para `PolygonProvider` | [polygon.io](https://polygon.io/) |
+| `ALPHAVANTAGE_API_KEY` | Alpha Vantage | Solo para `AlphaVantageProvider` | [alphavantage.co](https://www.alphavantage.co/support/#api-key) |
+| `FRED_API_KEY` | FRED / ALFRED | Solo para `MacroProvider` | [fred.stlouisfed.org](https://fred.stlouisfed.org/docs/api/api_key.html) |
+
+El fichero `.env` está en el `.gitignore`, así que las claves nunca se suben al repositorio. Si
+una clave no está en el `.env`, el proveedor la pide por pantalla al crearse.
+
+## Uso rápido
+
+```python
+import pandas as pd
+
+from market_toolkit.models import Portfolio
+from market_toolkit.providers.providers import YahooFinanceProvider
+
+# 1. Descargar: cada ticker se convierte en una FinancialSeries limpia y validada
+series = YahooFinanceProvider(["AAPL", "MSFT", "JPM"]).download(inicio="2022-01-01", fin="2024-12-31")
+series[0].resumen()  # media, desviación típica, rentabilidad y volatilidad anualizadas...
+
+# 2. Crear una cartera con sus pesos iniciales
+pesos = pd.DataFrame({"AAPL": [0.35], "MSFT": [0.35], "JPM": [0.30]},
+                     index=[pd.Timestamp("2022-01-01")])
+cartera = Portfolio(series, pesos)
+cartera.resumen()
+
+# 3. Simular y generar los informes
+simulacion = cartera.simulacion_monte_carlo(n_simulaciones=5000, semilla=42)
+print(cartera.report(tasa_libre_riesgo=0.04))
+cartera.plots_report()
+```
+
+En la [Guía de uso](#guía-de-uso) se explican todos los proveedores, las opciones de la cartera y
+los parámetros de la simulación.
+
+## Demo
+
+`examples/demo.py` recorre el toolkit de principio a fin: descarga acciones y un índice (y oro y
+el tipo libre de riesgo si hay claves de Alpha Vantage y FRED), crea una cartera, la simula y
+genera los informes.
+
+```bash
+python examples/demo.py              # datos reales
+python examples/demo.py --sin-red    # datos sintéticos, sin conexión
+python examples/demo.py --mostrar    # además, muestra los gráficos por pantalla
+```
+
+Si la descarga falla (sin conexión o con una API caída), la demo sigue con datos sintéticos. Los
+resultados se guardan en `outputs/` (ignorada por git):
+
+| Fichero | Contenido |
+| --- | --- |
+| `outputs/informe.md` | Informe en Markdown de la cartera |
+| `outputs/graficos/*.png` | Los seis gráficos de `plots_report()` |
+| `outputs/montecarlo/*.png` | Trayectorias y distribución del valor final de la simulación |
+
+## Tests
+
+```bash
+pytest           # tests
+ruff check .     # estilo y errores
+```
+
+Los tests usan datos sintéticos generados con semilla fija, así que no necesitan conexión. La
+integración continua de GitHub (`.github/workflows/ci.yml`) ejecuta `ruff` y `pytest` con
+Python 3.11 en cada push y pull request.
+
+## Arquitectura
+
+```mermaid
+flowchart LR
+    usuario(["Usuario:<br/>tickers + fechas"])
+
+    subgraph fuentes["Fuentes externas"]
+        yahoo[("Yahoo Finance")]
+        polygon[("Polygon / Massive")]
+        av[("Alpha Vantage")]
+        fred[("FRED / ALFRED")]
+    end
+
+    subgraph ingesta["1 · Ingesta (providers)"]
+        validar_tk["_validar_input()<br/>¿existe el ticker?"]
+        download["download()<br/>cierres ajustados<br/>índice sin zona horaria"]
+        limpiar["limpiar_serie()<br/>orden · duplicados · inf<br/>negativos · NaN"]
+    end
+
+    subgraph modelos["2 · Modelos"]
+        validacion{"validation<br/>¿serie válida?"}
+        fs["FinancialSeries<br/>estadísticos automáticos"]
+        ms["MacroSeries<br/>nivel: media y desviación"]
+        error["DataValidationError /<br/>InsufficientDataError"]
+    end
+
+    pesos(["Usuario:<br/>DataFrame de pesos"])
+
+    subgraph cartera["3 · Cartera (Portfolio)"]
+        juntar["juntar_series()<br/>alineación temporal<br/>+ conversión a USD"]
+        validar_p["validar pesos<br/>suman 1 · uno por activo"]
+        deriva["_calcular_pesos_activos()<br/>deriva entre rebalanceos"]
+        stats["_rendimientos_cartera()<br/>rentabilidad y volatilidad"]
+    end
+
+    subgraph simulacion["4 · Simulación"]
+        mc["MonteCarlo<br/>GBM + Cholesky"]
+        res["percentiles · VaR · CVaR<br/>probabilidad de pérdida"]
+    end
+
+    subgraph salida["5 · Resultados"]
+        resumen["resumen()"]
+        md["report()<br/>Markdown con métricas<br/>y advertencias"]
+        plots["plots_report()<br/>6 gráficos"]
+        graficos["graficar() /<br/>guardar_graficos()"]
+    end
+
+    usuario --> validar_tk
+    yahoo --> download
+    polygon --> download
+    av --> download
+    fred --> download
+    validar_tk --> download --> limpiar --> validacion
+    validacion -- "sí, precios" --> fs
+    validacion -- "sí, macro" --> ms
+    validacion -- "no" --> error
+    fs --> juntar
+    pesos --> validar_p
+    juntar --> validar_p --> deriva --> stats
+    stats --> resumen
+    stats --> md
+    stats --> plots
+    ms -. "tipo libre de riesgo" .-> md
+    stats --> mc
+    fs -- "un activo" --> mc
+    mc --> res --> graficos
+```
+
+La capa de ingesta (`providers`) está desacoplada del resto: transforma cada fuente en el mismo
+objeto estándar y los modelos nunca importan a los proveedores. Más detalle en
+[docs/architecture](docs/architecture/README.md):
+
+- [Diagrama de clases](docs/architecture/clases.md)
+- [Dependencias entre módulos](docs/architecture/dependencias.md), hoy y en la arquitectura objetivo
+- [Flujo de datos](docs/architecture/flujo.md)
+
+Las decisiones de diseño se justifican en los ADR (*Architecture Decision Records*) de
+[docs/adr](docs/adr/), por ejemplo la
+[validación estricta de las series](docs/adr/0002-validacion-de-inputs.md).
+
+## Estructura del proyecto
+
+```
+market-toolkit/
+├── src/market_toolkit/
+│   ├── config.py              # constantes y claves (.env)
+│   ├── exceptions.py          # jerarquía de excepciones propias
+│   ├── providers/             # ingesta: Yahoo, Polygon, Alpha Vantage y FRED
+│   ├── preprocessing/         # limpieza, alineación temporal y validación
+│   └── models/                # series, cartera, Monte Carlo y gráficos del informe
+├── tests/                     # tests con datos sintéticos (pytest)
+├── examples/demo.py           # demo de extremo a extremo
+├── docs/
+│   ├── architecture/          # diagramas (Mermaid)
+│   └── adr/                   # decisiones de diseño
+├── .env.example               # plantilla de las claves
+└── pyproject.toml             # dependencias y configuración
+```
+
+## Guía de uso
 
 <details>
 <summary><h2>Descarga de Datos</h2></summary>
@@ -735,3 +994,9 @@ Al crear el objeto se sustituyen los dos gráficos de la simulación anterior en
   descargado.
 
 </details>
+
+## Autores
+
+- [JAVIIFDEEZ](https://github.com/JAVIIFDEEZ)
+- [Mgalvaz](https://github.com/Mgalvaz)
+- [galartiker](https://github.com/galartiker)
