@@ -50,10 +50,7 @@ class Portfolio:
             último precio conocido de cada activo.
         """
         # Juntar activos
-<<<<<<< HEAD
-=======
         self._series = list(activos)
->>>>>>> origin/Martin-Dev
         self.precio_activos = juntar_series(activos, True, alineacion_temporal)
         # Validar pesos
         if not isinstance(pesos.index, pd.DatetimeIndex):
@@ -75,22 +72,19 @@ class Portfolio:
             raise ValueError(
                 f"Los pesos de cada fecha deben sumar 1. El {incorrectas.index[0].date()} "
                 f"suman {incorrectas.iloc[0]:.4f}.")
-<<<<<<< HEAD
-=======
         # Los activos y pesos indicados identifican la cartera, aunque se añadan fechas de precios
         self._firma = hashlib.sha256(pesos.sort_index(axis=1).to_csv().encode()).hexdigest()
->>>>>>> origin/Martin-Dev
         # Ajuste temporal entre los pesos y los activos
         fechas_activos = self.precio_activos.index[self.precio_activos.index >= pesos.index[0]]
         pesos = pesos.reindex(pesos.index.union(fechas_activos))
         if pesos.index[0] < self.precio_activos.index[0]:
             warnings.warn(
                 "Hay pesos configurados para antes de la existencia de algunos activos. "
-                "Se truncan para que el día de inicio coincida con el de los activos.",
+                "La cartera empieza en la primera sesión con los últimos pesos indicados "
+                "hasta entonces.",
                 UserWarning,
                 stacklevel=2,
             )
-            pesos = pesos[self.precio_activos.index[0]:]
         elif pesos.index[0] > self.precio_activos.index[0]:
             warnings.warn(
                 "Hay activos configurados para antes de la existencia de los pesos. "
@@ -160,38 +154,45 @@ class Portfolio:
         asociados.
         :param pesos: Pesos con los rebalances introducidos con el usuaio. El resto de días son NaN.
         :param rentabilidades: Rentabilidades de los activos asociados.
-        :return: Los pesos ajustados a los rendimientos de los activos
+        :return: Los pesos con los que empieza cada sesión de los activos. Los pesos nuevos se
+            aplican ya al rendimiento de su propia fecha o, si no hay sesión ese día, al de la
+            siguiente sesión.
         """
-        # Identificar fechas de rebalanceo
-        rebalanceo = pesos.notna().all(axis=1)
-        # Evolución acumulada de cada activo desde el último rebalanceo
-        factores = (1 + rentabilidades).groupby(rebalanceo.cumsum()).cumprod()
-        # Peso inicial de cada tramo
-        pesos_iniciales = pesos.where(rebalanceo).ffill()
-        # Evolución de los pesos
-        pesos_evolucionados = pesos_iniciales * factores
-        # Normalización para que sumen 1
-        pesos_evolucionados = pesos_evolucionados.div(
-            pesos_evolucionados.sum(axis=1),
-            axis=0
-        )
-        # Conservar los pesos objetivo en fechas de rebalanceo
-        pesos = pesos.where(
-            rebalanceo,
-            pesos_evolucionados
-        )
-        return pesos
+        # Cada cambio de pesos se traslada a la primera sesión igual o posterior a su fecha
+        cambios = pesos.dropna()
+        posiciones = rentabilidades.index.searchsorted(cambios.index)
+        con_sesion = posiciones < len(rentabilidades.index)
+        cambios = cambios[con_sesion]
+        cambios.index = rentabilidades.index[posiciones[con_sesion]]
+        cambios = cambios[~cambios.index.duplicated(keep="last")]
+        # Tramos entre cambios de pesos
+        tramos = pd.Series(
+            rentabilidades.index.isin(cambios.index),
+            index=rentabilidades.index
+        ).cumsum()
+        # Evolución de cada activo dentro del tramo hasta el cierre de la sesión anterior
+        crecimiento = (1 + rentabilidades.fillna(0)).groupby(tramos).cumprod()
+        factores = crecimiento.groupby(tramos).shift(1).fillna(1)
+        # Evolución de los pesos, normalizados para que sumen 1
+        pesos_evolucionados = cambios.reindex(rentabilidades.index).ffill() * factores
+        return pesos_evolucionados.div(pesos_evolucionados.sum(axis=1), axis=0)
+
+    @property
+    def pesos_actuales(self) -> pd.Series:
+        """Pesos de la cartera al cierre de su última sesión."""
+        rendimientos = self.precio_activos.pct_change(fill_method=None).iloc[-1].fillna(0)
+        pesos = self.pesos.iloc[-1] * (1 + rendimientos)
+        return pesos / pesos.sum()
 
     def _calcular_estadisticos(self):
         """
         Determina distintos estadísticos de la cartera, como la rentabilidad media diaria, la
         volatilidad, la rentabilidad media anualizada y la volatilidad anualizada.
         """
-        # Rendimiento de la cartera: rendimiento de cada activo por el peso que tenía el capital
-        # en él al cierre de la sesión anterior
+        # Rendimiento de la cartera: rendimiento de cada activo por el peso con el que empieza
+        # la sesión
         rendimientos_activos = self.precio_activos.pct_change(fill_method=None)
-        pesos = self.pesos.reindex(self.precio_activos.index).ffill().shift(1)
-        rendimientos = (rendimientos_activos * pesos).dropna().sum(axis=1)
+        rendimientos = (rendimientos_activos * self.pesos).dropna().sum(axis=1)
         if len(rendimientos) < 2:
             raise InsufficientDataError(
                 "La cartera no tiene suficientes fechas con precios de sus activos para "
@@ -310,7 +311,7 @@ class Portfolio:
         """
         return {
             "precio_activos": list(self.precio_activos.columns),
-            "pesos_actuales": self.pesos.iloc[-1].to_dict(),
+            "pesos_actuales": self.pesos_actuales.to_dict(),
             "moneda": "USD",
             "inicio": self.precio_activos.index[0].date(),
             "fin": self.precio_activos.index[-1].date(),
@@ -412,7 +413,7 @@ class Portfolio:
              rentabilidad: float | int | Mapping[str, float | int] | None = None,
              volatilidad: float | int | Mapping[str, float | int] | None = None,
              valor_inicial: float | int | None = None,
-             rebalanceo: bool = True,
+             rebalanceo: bool = False,
              semilla: int | None = None,
              guardar_graficos: bool = True) -> montecarlo.MonteCarlo:
         """
@@ -426,8 +427,8 @@ class Portfolio:
             `rentabilidad`.
         :param valor_inicial: Valor de partida. Por defecto, el último precio del activo o 100
             para una cartera.
-        :param rebalanceo: Solo para carteras. `True` para mantener los pesos constantes cada
-            día (rebalanceo diario) y `False` para comprar al inicio y no tocar la cartera.
+        :param rebalanceo: `False` (por defecto) para comprar al inicio y no tocar la cartera y
+            `True` para mantener los pesos constantes cada día (rebalanceo diario).
         :param semilla: Semilla del generador aleatorio, para obtener resultados reproducibles.
         :param guardar_graficos: `True` para borrar los gráficos de la simulación anterior y
             guardar los de esta en `models/graficos/` (trayectorias.png y distribucion.png).

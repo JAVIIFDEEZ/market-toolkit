@@ -341,8 +341,10 @@ Requisitos de los pesos:
 
 ### Cambiar los pesos en el tiempo
 
-Solo se indican las fechas en las que cambian los pesos: cada fila se mantiene hasta la siguiente.
-Con una sola fila, los pesos son fijos durante todo el periodo.
+Solo se indican las fechas en las que cambian los pesos. Cada fila reparte el capital con esos
+pesos y **se aplica ese mismo día**: el rendimiento de esa fecha ya usa los pesos nuevos. Si la
+fecha no tiene sesión, se aplica en la siguiente. Entre una fila y la siguiente no se rebalancea
+y los pesos evolucionan con los precios. Con una sola fila, se compra al inicio y no se toca más.
 
 ```python
 cambios = pd.DataFrame(
@@ -350,17 +352,22 @@ cambios = pd.DataFrame(
     index=pd.to_datetime(["2025-01-02", "2025-07-01"]),
 )
 con_cambio = Portfolio(series, cambios)
-con_cambio.pesos.loc["2025-06-30":"2025-07-01"]
+con_cambio.pesos.loc["2025-06-30":"2025-07-02"].round(4)
 ```
 
 ```
-            AAPL  SAN.MC  VOD.L
-2025-06-30   0.5     0.3    0.2
-2025-07-01   0.2     0.6    0.2
+              AAPL  SAN.MC   VOD.L
+Date
+2025-06-30  0.3413  0.4548  0.2039
+2025-07-01  0.2000  0.6000  0.2000
+2025-07-02  0.2015  0.5945  0.2040
 ```
 
-Si la primera fila de pesos es anterior a los activos, los pesos se recortan. Si es posterior, la
-cartera empieza ese día y se descartan los precios anteriores. En ambos casos se avisa.
+`cartera.pesos` da los pesos con los que empieza cada sesión.
+
+Si la primera fila de pesos es anterior a los activos, la cartera empieza en la primera sesión con
+los últimos pesos indicados hasta entonces. Si es posterior, la cartera empieza ese día y se
+descartan los precios anteriores. En ambos casos se avisa.
 
 ### Estadísticos
 
@@ -371,21 +378,24 @@ cartera.resumen()
 ```
 
 ```
-activos                    ['AAPL', 'SAN.MC', 'VOD.L']
-pesos_actuales             {'AAPL': 0.5, 'SAN.MC': 0.3, 'VOD.L': 0.2}
+precio_activos             ['AAPL', 'SAN.MC', 'VOD.L']
+pesos_actuales             {'AAPL': 0.3350684087088535, 'SAN.MC': 0.4800346937069508, 'VOD.L': 0.1848968975841957}
 moneda                     USD
 inicio                     2025-01-02
 fin                        2025-12-31
 observaciones              245
-media_diaria               0.0019989400659197187
-desviacion_tipica_diaria   0.013793942281151892
-rentabilidad_anualizada    0.6540554165499295
-volatilidad_anualizada     0.21897204525064146
+media_diaria               0.0022004648843354942
+desviacion_tipica_diaria   0.013674283583884875
+rentabilidad_anualizada    0.7400397305550688
+volatilidad_anualizada     0.2170725223195945
 ```
 
+`pesos_actuales` son los pesos al cierre de la última sesión, después de evolucionar con los
+precios.
+
 El rendimiento diario de la cartera es la suma de los rendimientos de cada activo multiplicados
-por sus pesos, los vigentes al cierre de la sesión anterior. Los pesos se aplican a las
-**rentabilidades**, nunca a los precios, así que el precio de cada acción no influye.
+por los pesos con los que empieza esa sesión. Los pesos se aplican a las **rentabilidades**, nunca
+a los precios, así que el precio de cada acción no influye.
 
 | Estadístico | Atributo | Cálculo |
 |---|---|---|
@@ -478,7 +488,7 @@ Las cotizaciones en centésimas se ajustan automáticamente: `GBp` y `GBX` (peni
 (céntimos de rand) e `ILA` (agorot). En el ejemplo, `VOD.L` cotiza en peniques y aparece en USD:
 
 ```python
-cartera.activos.tail(2)
+cartera.precio_activos.tail(2)
 ```
 
 ```
@@ -490,7 +500,8 @@ Date
 
 ### Rebalanceo
 
-Pendiente de definir.
+La cartera **no se rebalancea automáticamente**. Los pesos solo vuelven a un valor concreto en las
+fechas indicadas en el `DataFrame` de pesos; el resto de días evolucionan con los precios.
 
 </details>
 
@@ -509,7 +520,7 @@ mc = MonteCarlo(aapl, n_simulaciones=5000, horizonte=252, semilla=42)
 mc.resumen()
 
 # Una cartera: se llama al método de Portfolio, que devuelve el MonteCarlo y muestra los gráficos
-mc = cartera.simulacion_monte_carlo(horizonte=504, rentabilidad={"SAN.MC": 0.05}, rebalanceo=False)
+mc = cartera.simulacion_monte_carlo(horizonte=504, rentabilidad={"SAN.MC": 0.05})
 mc.resumen()
 ```
 
@@ -561,11 +572,11 @@ por la diversificación suele ser menor. Las correlaciones siempre son las hist�
 
 **En una cartera**, los activos se simulan a la vez y sus movimientos diarios mantienen las
 **correlaciones históricas** entre ellos (si dos activos suelen subir juntos, en la simulación
-también). Después se combinan con los **pesos actuales** de la cartera (su última fila de pesos).
-El resultado está en USD. En la simulación, el **rebalanceo es un parámetro libre**:
+también). Después se combinan con los **pesos actuales** de la cartera (al cierre de su última
+sesión). El resultado está en USD. Por defecto **no hay rebalanceo**:
 
-- `rebalanceo=True` (por defecto): los pesos se cumplen todos los días.
-- `rebalanceo=False`: se compra al inicio con esos pesos y no se toca la cartera.
+- `rebalanceo=False` (por defecto): se compra al inicio con esos pesos y no se toca la cartera.
+- `rebalanceo=True`: los pesos se restablecen todos los días.
 
 ### Parámetros
 
@@ -575,7 +586,7 @@ El resultado está en USD. En la simulación, el **rebalanceo es un parámetro l
 | `horizonte` | Sesiones a simular (252 = un año) | 252 |
 | `rentabilidad`, `volatilidad` | Media y volatilidad anuales, a elección del usuario. En una cartera, un número para todos los activos o un diccionario por activo | Históricas |
 | `valor_inicial` | Valor de partida | Último precio del activo, o 100 USD en una cartera |
-| `rebalanceo` | Solo carteras, a elección del usuario: `True` cumple los pesos cada día y `False` compra y mantiene | `True` |
+| `rebalanceo` | Solo carteras: `False` compra y mantiene y `True` restablece los pesos cada día | `False` |
 | `semilla` | Fija el azar para obtener siempre el mismo resultado | `None` |
 | `guardar_graficos` | Guarda los gráficos de la simulación | `True` |
 
