@@ -8,7 +8,7 @@ version = "0.2.1"
 description = "Toolkit de extracción, análisis bursátil y gestión de carteras"
 readme = "README.md"
 requires-python = ">=3.11"
-authors = [{ name = "Nombre 1" }, { name = "Nombre 2" }, { name = "Nombre 3" }]
+authors = [{ name = "JAVIIFDEEZ" }, { name = "Mgalvaz" }, { name = "galartiker" }]
 dependencies = [
   "pandas>=2.0",
   "numpy>=1.26",

@@ -61,3 +61,36 @@ def precios_calendarios_distintos(fechas_laborables: pd.DatetimeIndex) -> pd.Dat
     precios.iloc[:5, 1] = np.nan  # el segundo activo empieza a cotizar más tarde
     precios.iloc[200, 1] = np.nan  # dato perdido
     return precios
+
+
+@pytest.fixture(autouse=True)
+def carpeta_graficos_temporal(tmp_path, monkeypatch):
+    """Los gráficos que se guardan durante los tests van a una carpeta temporal, no al repo."""
+    import market_toolkit.models.montecarlo as montecarlo
+
+    monkeypatch.setattr(montecarlo, "CARPETA_GRAFICOS", tmp_path / "graficos")
+
+
+@pytest.fixture
+def activos_usd(precios_sinteticos: pd.DataFrame) -> list:
+    """Tres acciones en USD, para que la cartera no tenga que descargar tipos de cambio."""
+    from market_toolkit.models import FinancialSeries, TipoActivo
+
+    activos = []
+    for ticker in precios_sinteticos.columns:
+        activos.append(FinancialSeries(precios_sinteticos[ticker], TipoActivo.ACCION, moneda="USD"))
+    return activos
+
+
+@pytest.fixture
+def pesos_iniciales(fechas_laborables: pd.DatetimeIndex) -> pd.DataFrame:
+    """Pesos 50/30/20 fijados el primer día, sin rebalanceos posteriores."""
+    return pd.DataFrame({"AAA": [0.5], "BBB": [0.3], "CCC": [0.2]}, index=[fechas_laborables[0]])
+
+
+@pytest.fixture
+def cartera(activos_usd: list, pesos_iniciales: pd.DataFrame):
+    """Cartera de tres acciones en USD con pesos 50/30/20."""
+    from market_toolkit.models import Portfolio
+
+    return Portfolio(activos_usd, pesos_iniciales)

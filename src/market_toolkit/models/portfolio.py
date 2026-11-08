@@ -521,10 +521,9 @@ class Portfolio:
             cagr = valor_final ** (DIAS_COTIZACION_ANUAL / numero_sesiones) - 1
         else:
             cagr = None
-        exceso_diario = rendimientos - (1 + tasa_libre_riesgo) ** (1 / DIAS_COTIZACION_ANUAL) + 1
-        sharpe = (
-            float(exceso_diario.mean() / self.desviacion_tipica * np.sqrt(DIAS_COTIZACION_ANUAL))
-            if self.desviacion_tipica > 0 else None
+        exceso_diario = rendimientos - tasa_libre_riesgo / DIAS_COTIZACION_ANUAL
+        sharpe = float(
+            exceso_diario.mean() / self.desviacion_tipica * np.sqrt(DIAS_COTIZACION_ANUAL)
         )
         desviacion_bajista = float(np.sqrt(np.square(exceso_diario.clip(upper=0)).mean()))
         sortino = (
@@ -585,6 +584,7 @@ class Portfolio:
                 self.precio_activos
             )
 
+        pesos_actuales = self.pesos_actuales  # Pesos al cierre de la última sesión
         advertencias = []
         fortalezas = []
         if  self.volatilidad_anualizada > max_volatilidad:
