@@ -307,6 +307,150 @@ distintos por las revisiones y el cambio de año base.
 </details>
 
 <details>
+<summary><h2>Cartera</h2></summary>
+
+`Portfolio` (en `models/portfolio.py`) agrupa una o varias series de precios (`FinancialSeries`)
+con sus pesos. Al crearla se alinean las fechas, se pasan los precios a USD y se calculan sus
+estadísticos.
+
+### Crear una cartera
+
+Hacen falta los activos y un `DataFrame` de pesos con un índice de fechas y una columna por activo:
+
+```python
+import pandas as pd
+
+from market_toolkit.models import Portfolio
+from market_toolkit.providers.providers import YahooFinanceProvider
+
+series = YahooFinanceProvider(["AAPL", "SAN.MC", "VOD.L"]).download(inicio="2025-01-02",
+                                                                    fin="2026-01-01")
+pesos = pd.DataFrame(
+    {"AAPL": [0.5], "SAN.MC": [0.3], "VOD.L": [0.2]},
+    index=pd.to_datetime(["2025-01-02"]),
+)
+cartera = Portfolio(series, pesos)
+```
+
+Requisitos de los pesos:
+
+- Las columnas deben ser exactamente los activos de la cartera. Cada peso se empareja con su
+  activo **por nombre**, así que el orden de las columnas da igual.
+- Los pesos de cada fecha deben **sumar 1**.
+- El índice debe ser de fechas (`DatetimeIndex`).
+
+### Cambiar los pesos en el tiempo
+
+Solo se indican las fechas en las que cambian los pesos: cada fila se mantiene hasta la siguiente.
+Con una sola fila, los pesos son fijos durante todo el periodo.
+
+```python
+cambios = pd.DataFrame(
+    {"AAPL": [0.5, 0.2], "SAN.MC": [0.3, 0.6], "VOD.L": [0.2, 0.2]},
+    index=pd.to_datetime(["2025-01-02", "2025-07-01"]),
+)
+con_cambio = Portfolio(series, cambios)
+con_cambio.pesos.loc["2025-06-30":"2025-07-01"]
+```
+
+```
+            AAPL  SAN.MC  VOD.L
+2025-06-30   0.5     0.3    0.2
+2025-07-01   0.2     0.6    0.2
+```
+
+Si la primera fila de pesos es anterior a los activos, los pesos se recortan. Si es posterior, la
+cartera empieza ese día y se descartan los precios anteriores. En ambos casos se avisa.
+
+### Estadísticos
+
+Se calculan automáticamente al crear la cartera y se obtienen con `resumen()`:
+
+```python
+cartera.resumen()
+```
+
+```
+activos                    ['AAPL', 'SAN.MC', 'VOD.L']
+pesos_actuales             {'AAPL': 0.5, 'SAN.MC': 0.3, 'VOD.L': 0.2}
+moneda                     USD
+inicio                     2025-01-02
+fin                        2025-12-31
+observaciones              245
+media_diaria               0.0019989400659197187
+desviacion_tipica_diaria   0.013793942281151892
+rentabilidad_anualizada    0.6540554165499295
+volatilidad_anualizada     0.21897204525064146
+```
+
+El rendimiento diario de la cartera es la suma de los rendimientos de cada activo multiplicados
+por sus pesos, los vigentes al cierre de la sesión anterior. Los pesos se aplican a las
+**rentabilidades**, nunca a los precios, así que el precio de cada acción no influye.
+
+| Estadístico | Atributo | Cálculo |
+|---|---|---|
+| `media_diaria` | `rentabilidad_media` | Media de los rendimientos diarios de la cartera |
+| `desviacion_tipica_diaria` | `desviacion_tipica` | Desviación típica de esos rendimientos |
+| `rentabilidad_anualizada` | `rentabilidad_anualizada` | `(1 + media_diaria)^252 - 1` |
+| `volatilidad_anualizada` | `volatilidad_anualizada` | `desviacion_tipica_diaria × √252` |
+
+`cartera.metadatos_activos` da la información de cada activo, con sus estadísticos en USD y sobre
+las fechas de la cartera:
+
+```
+                               AAPL      SAN.MC       VOD.L
+Información
+moneda                          USD         USD         USD
+inicio                   2025-01-02  2025-01-02  2025-01-02
+fin                      2025-12-31  2025-12-31  2025-12-31
+observaciones                   245         245         245
+rentabilidad_anualizada    0.184128    1.912644    0.629926
+volatilidad_anualizada     0.325491    0.328106    0.281661
+```
+
+### Calendario
+
+Cada mercado tiene sus festivos. El parámetro `alineacion_temporal` decide qué hacer con las
+fechas en las que no cotizan todos los activos:
+
+| Opción | Qué hace | Fechas en el ejemplo |
+|---|---|---|
+| `"eliminacion"` (por defecto) | Elimina esas fechas | 245 |
+| `"relleno"` | Usa el último precio conocido de cada activo | 258 |
+
+```python
+cartera = Portfolio(series, pesos, alineacion_temporal="relleno")
+```
+
+Con cualquiera de las dos opciones, la cartera empieza cuando existen todos sus activos.
+
+### Monedas
+
+Todos los precios de la cartera se pasan a **USD** con el tipo de cambio diario de Yahoo Finance
+(`EURUSD=X`, `GBPUSD=X`...), de modo que las rentabilidades incluyen la variación de la divisa. Cada
+activo debe tener su moneda informada.
+
+Las cotizaciones en centésimas se ajustan automáticamente: `GBp` y `GBX` (peniques), `ZAc`
+(céntimos de rand) e `ILA` (agorot). En el ejemplo, `VOD.L` cotiza en peniques y aparece en USD:
+
+```python
+cartera.activos.tail(2)
+```
+
+```
+                AAPL   SAN.MC   VOD.L
+Date
+2025-12-30  272.3387  11.6383  1.3311
+2025-12-31  271.1220  11.5488  1.3314
+```
+
+### Rebalanceo
+
+Pendiente de definir.
+
+</details>
+
+<details>
 <summary><h2>Simulación</h2></summary>
 
 `MonteCarlo` (en `models/montecarlo.py`) simula **miles de futuros posibles** de un activo
@@ -321,9 +465,12 @@ mc = MonteCarlo(aapl, n_simulaciones=5000, horizonte=252, semilla=42)
 mc.resumen()
 
 # Una cartera: se llama al método de Portfolio, que devuelve el MonteCarlo y muestra los gráficos
-mc = cartera.simulacion_monte_carlo(horizonte=504, rentabilidad={"MSFT": 0.05}, rebalanceo=False)
+mc = cartera.simulacion_monte_carlo(horizonte=504, rentabilidad={"SAN.MC": 0.05}, rebalanceo=False)
 mc.resumen()
 ```
+
+`aapl` es la serie descargada en el apartado *Acciones / Stocks* y `cartera` es la creada en el
+apartado *Cartera*.
 
 ### Cómo funciona
 
@@ -339,7 +486,8 @@ diario **aleatorio**, sacado de una distribución normal (gaussiana). Repitiendo
 | Volatilidad anual `σ` | `desviación típica de los rendimientos diarios × √252` |
 
 En un activo son los mismos estadísticos que ya calcula `FinancialSeries` al crearse. En una
-cartera se calculan para cada activo sobre las fechas en las que cotizan todos.
+cartera son los de cada activo en `cartera.metadatos_activos`: en USD y sobre las fechas de la
+cartera.
 
 **La media y la volatilidad se pueden cambiar libremente.** El histórico solo se usa si no se
 indica otra cosa:
@@ -350,7 +498,7 @@ MonteCarlo(aapl, rentabilidad=0.08, volatilidad=0.20)   # 8 % y 20 % anual
 # En una cartera, el mismo valor para todos los activos...
 cartera.simulacion_monte_carlo(rentabilidad=0.08, volatilidad=0.20)
 # ...o un valor por activo: los que no se indiquen mantienen su histórico
-cartera.simulacion_monte_carlo(rentabilidad={"MSFT": 0.05}, volatilidad={"AAPL": 0.30})
+cartera.simulacion_monte_carlo(rentabilidad={"SAN.MC": 0.05}, volatilidad={"AAPL": 0.30})
 ```
 
 Los valores son por activo, así que `volatilidad=0.20` no significa que la cartera tenga un 20 %:
@@ -369,8 +517,8 @@ por la diversificación suele ser menor. Las correlaciones siempre son las hist�
 
 **En una cartera**, los activos se simulan a la vez y sus movimientos diarios mantienen las
 **correlaciones históricas** entre ellos (si dos activos suelen subir juntos, en la simulación
-también). Después se combinan con los **pesos actuales** de la cartera. El **rebalanceo es un
-parámetro libre**:
+también). Después se combinan con los **pesos actuales** de la cartera (su última fila de pesos).
+El resultado está en USD. En la simulación, el **rebalanceo es un parámetro libre**:
 
 - `rebalanceo=True` (por defecto): los pesos se cumplen todos los días.
 - `rebalanceo=False`: se compra al inicio con esos pesos y no se toca la cartera.
@@ -382,7 +530,7 @@ parámetro libre**:
 | `n_simulaciones` | Número de caminos simulados | 1000 |
 | `horizonte` | Sesiones a simular (252 = un año) | 252 |
 | `rentabilidad`, `volatilidad` | Media y volatilidad anuales, a elección del usuario. En una cartera, un número para todos los activos o un diccionario por activo | Históricas |
-| `valor_inicial` | Valor de partida | Último precio del activo, o 100 en una cartera |
+| `valor_inicial` | Valor de partida | Último precio del activo, o 100 USD en una cartera |
 | `rebalanceo` | Solo carteras, a elección del usuario: `True` cumple los pesos cada día y `False` compra y mantiene | `True` |
 | `semilla` | Fija el azar para obtener siempre el mismo resultado | `None` |
 | `guardar_graficos` | Guarda los gráficos de la simulación | `True` |
