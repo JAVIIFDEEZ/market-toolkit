@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+import hashlib
 import warnings
 from collections.abc import Mapping, Sequence
+from itertools import combinations_with_replacement
 from typing import TYPE_CHECKING, Literal
 
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+from matplotlib.figure import Figure
 
 import market_toolkit.models.montecarlo as montecarlo
 from market_toolkit.config import DIAS_COTIZACION_ANUAL
@@ -45,6 +49,7 @@ class Portfolio:
             último precio conocido de cada activo.
         """
         # Juntar activos
+        self._series = list(activos)
         self.activos = juntar_series(activos, True, alineacion_temporal)
         # Validar pesos
         if not isinstance(pesos.index, pd.DatetimeIndex):
@@ -66,6 +71,8 @@ class Portfolio:
             raise ValueError(
                 f"Los pesos de cada fecha deben sumar 1. El {incorrectas.index[0].date()} "
                 f"suman {incorrectas.iloc[0]:.4f}.")
+        # Los activos y pesos indicados identifican la cartera, aunque se añadan fechas de precios
+        self._firma = hashlib.sha256(pesos.sort_index(axis=1).to_csv().encode()).hexdigest()
         # Pesos de los activos. Cada fila se mantiene hasta el siguiente cambio: se añaden las
         # fechas de los activos desde el primer peso para que unos pesos fijos (una sola fila)
         # se extiendan a todo el periodo de la cartera
@@ -106,6 +113,7 @@ class Portfolio:
         self.metadatos ={activo.activo: activo.metadatos for activo in activos}
         # Calcular estadisticos
         self._calcular_estadisticos()
+        self._borrar_correlacion_si_cambia()
 
     def _calcular_metadatos_activos(self, activos: Sequence[FinancialSeries]) -> pd.DataFrame:
         """
@@ -149,6 +157,104 @@ class Portfolio:
         self.desviacion_tipica = float(rendimientos.std())
         self.rentabilidad_anualizada = (1 + self.rentabilidad_media) ** DIAS_COTIZACION_ANUAL - 1
         self.volatilidad_anualizada = self.desviacion_tipica * np.sqrt(DIAS_COTIZACION_ANUAL)
+
+    def correlacion(self, t: float) -> pd.DataFrame:
+        """
+        Calcula la correlación de los rendimientos diarios de los activos durante los últimos
+        `t` años de la cartera y guarda la matriz como imagen en `models/graficos/correlacion.png`.
+        Cada pareja de activos se calcula con sus propias fechas comunes, en USD.
+        :param t: Años hacia atrás desde la última fecha de la cartera (admite fracciones).
+        :return: DataFrame con la matriz de correlaciones.
+        """
+        if not t > 0:
+            raise ValueError("El número de años `t` debe ser mayor que 0.")
+        ultima_fecha = self.activos.index[-1]
+        desde = ultima_fecha - pd.Timedelta(days=t * 365.25)
+        if desde < self.activos.index[0]:
+            warnings.warn(
+                f"La cartera solo tiene datos desde {self.activos.index[0].date()}. "
+                f"La correlación se calcula con ese periodo, más corto que {t} años.",
+                UserWarning,
+                stacklevel=2,
+            )
+        # Precios en USD de cada activo con su propio calendario, en el periodo de la cartera
+        precios = juntar_series(self._series, True, None).loc[self.activos.index[0]:ultima_fecha]
+        nombres = list(self.activos.columns)
+        correlaciones = pd.DataFrame(np.eye(len(nombres)), index=nombres, columns=nombres)
+        sesiones = []
+        for activo_a, activo_b in combinations_with_replacement(nombres, 2):
+            columnas = [activo_a] if activo_a == activo_b else [activo_a, activo_b]
+            # Rendimientos de la pareja entre sus fechas comunes consecutivas
+            rendimientos = precios[columnas].dropna().pct_change(fill_method=None).dropna()
+            rendimientos = rendimientos[rendimientos.index > desde]
+            if len(rendimientos) < 2:
+                raise InsufficientDataError(
+                    f"No hay suficientes sesiones comunes de {activo_a} y {activo_b} en los "
+                    f"últimos {t} años para calcular la correlación.")
+            sesiones.append(len(rendimientos))
+            if activo_a != activo_b:
+                valor = rendimientos[activo_a].corr(rendimientos[activo_b])
+                correlaciones.loc[activo_a, activo_b] = valor
+                correlaciones.loc[activo_b, activo_a] = valor
+        inicio = max(desde, self.activos.index[0])
+        self._guardar_grafico_correlacion(correlaciones, inicio, ultima_fecha, sesiones)
+        return correlaciones
+
+    def _borrar_correlacion_si_cambia(self) -> None:
+        """Borra `correlacion.png` si se generó con una cartera distinta a esta."""
+        grafico = montecarlo.CARPETA_GRAFICOS / "correlacion.png"
+        firma = montecarlo.CARPETA_GRAFICOS / "correlacion.firma"
+        if firma.exists() and firma.read_text() == self._firma:
+            return
+        grafico.unlink(missing_ok=True)
+        firma.unlink(missing_ok=True)
+
+    def _guardar_grafico_correlacion(self, correlaciones: pd.DataFrame, inicio: pd.Timestamp,
+                                     fin: pd.Timestamp, sesiones: list[int]) -> None:
+        """
+        Guarda la matriz de correlaciones como una cuadrícula con escala de -1 a 1.
+        :param correlaciones: Matriz de correlaciones.
+        :param inicio: Primera fecha del periodo, para el título.
+        :param fin: Última fecha del periodo, para el título.
+        :param sesiones: Número de sesiones de cada pareja de activos, para el título.
+        """
+        n_activos = len(correlaciones)
+        lado = max(5.0, 1.1 * n_activos + 2)
+        figura = Figure(figsize=(lado + 1, lado), facecolor=montecarlo.COLORES["superficie"])
+        eje = figura.subplots()
+        mapa = plt.get_cmap("plasma")
+        imagen = eje.imshow(correlaciones.to_numpy(), cmap=mapa, vmin=-1, vmax=1)
+        posiciones = np.arange(n_activos)
+        eje.set_xticks(posiciones, correlaciones.columns, rotation=45, ha="right")
+        eje.set_yticks(posiciones, correlaciones.index)
+        eje.tick_params(length=0, labelsize=10, colors=montecarlo.COLORES["texto_secundario"])
+        # Separación entre celdas
+        eje.set_xticks(posiciones[:-1] + 0.5, minor=True)
+        eje.set_yticks(posiciones[:-1] + 0.5, minor=True)
+        eje.grid(which="minor", color=montecarlo.COLORES["superficie"], linewidth=2)
+        eje.tick_params(which="minor", length=0)
+        for lado_eje in eje.spines.values():
+            lado_eje.set_visible(False)
+        # Valor en cada celda, en negro o blanco según lo claro que sea el color de fondo
+        for fila, columna in np.ndindex(correlaciones.shape):
+            valor = correlaciones.iat[fila, columna]
+            rojo, verde, azul, _ = mapa(imagen.norm(valor))
+            claro = 0.299 * rojo + 0.587 * verde + 0.114 * azul > 0.5
+            eje.text(columna, fila, f"{valor:.2f}", ha="center", va="center", fontsize=10,
+                     color="black" if claro else "white")
+        barra = figura.colorbar(imagen, ax=eje, fraction=0.046, pad=0.04)
+        barra.ax.tick_params(labelsize=9, colors=montecarlo.COLORES["texto_secundario"])
+        barra.outline.set_visible(False)
+        n_sesiones = (f"{min(sesiones)}" if min(sesiones) == max(sesiones)
+                      else f"{min(sesiones)}-{max(sesiones)}")
+        eje.set_title(
+            f"Correlación de rendimientos diarios\n{inicio.date()} a {fin.date()} · "
+            f"{n_sesiones} sesiones comunes por pareja",
+            loc="left", color=montecarlo.COLORES["texto"], fontsize=12)
+        montecarlo.CARPETA_GRAFICOS.mkdir(parents=True, exist_ok=True)
+        figura.savefig(montecarlo.CARPETA_GRAFICOS / "correlacion.png", dpi=150,
+                       bbox_inches="tight", facecolor=montecarlo.COLORES["superficie"])
+        (montecarlo.CARPETA_GRAFICOS / "correlacion.firma").write_text(self._firma)
 
     def resumen(self) -> dict:
         """
