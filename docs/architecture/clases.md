@@ -1,0 +1,200 @@
+# Diagrama de clases
+
+Jerarquía de clases del toolkit y relaciones entre ellas. Lo cubre el apartado 4.6 del enunciado
+junto con [dependencias](dependencias.md) y [flujo](flujo.md).
+
+```mermaid
+classDiagram
+    direction TB
+
+    class Provider {
+        <<abstract>>
+        +tickers: list~str~
+        #_validar_input(tickers)* list~str~
+        +download(inicio, fin, periodo, **opciones)* list~SerieTemporal~
+        +incorporar_tickers(tickers_nuevos)
+        +eliminar_tickers(tickers_eliminar)
+    }
+    class YahooFinanceProvider {
+        +download(...) list~FinancialSeries~
+        +desde_nombres(nombres)$ YahooFinanceProvider
+    }
+    class PolygonProvider {
+        +cliente: RESTClient
+        +pausa: int
+        +download(...) list~FinancialSeries~
+    }
+    class AlphaVantageProvider {
+        +COMMODITIES: dict
+        +pausa: float
+        +download(...) list~FinancialSeries~
+    }
+    class MacroProvider {
+        +SERIES: dict
+        +cliente: Fred
+        +download(..., vintage, frecuencia, agregacion) list~MacroSeries~
+    }
+
+    class SerieTemporal {
+        <<dataclass frozen>>
+        +serie_temporal: pd.Series
+        +metadatos: dict
+        +nombre: str
+        +inicio: date
+        +fin: date
+        +duracion: int
+        +observaciones: int
+        #_validar()
+        #_calcular_estadisticos()
+    }
+    class FinancialSeries {
+        <<dataclass frozen>>
+        +tipo_activo: TipoActivo
+        +moneda: str
+        +bolsa: str
+        +proveedor: str
+        +rentabilidad_media: float
+        +desviacion_tipica: float
+        +rentabilidad_anualizada: float
+        +volatilidad_anualizada: float
+        +rendimientos(tipo) pd.Series
+        +resumen() dict
+    }
+    class MacroSeries {
+        <<dataclass frozen>>
+        +unidad: str
+        +proveedor: str
+        +media: float
+        +desviacion_tipica: float
+        +ultimo_valor: float
+        +resumen() dict
+    }
+    class TipoActivo {
+        <<enumeration>>
+        ACCION
+        INDICE
+        COMMODITY
+    }
+    class Fundamentales {
+        <<dataclass frozen>>
+        +ticker: str
+        +fecha_ejercicio: date
+        +roe: float
+        +roa: float
+        +margen: float
+        +rotacion: float
+        +per: float
+        +price_to_book: float
+    }
+
+    class Portfolio {
+        +precio_activos: pd.DataFrame
+        +pesos: pd.DataFrame
+        +pesos_actuales: pd.Series
+        +metadatos_activos: pd.DataFrame
+        +rentabilidad_media: float
+        +desviacion_tipica: float
+        +rentabilidad_anualizada: float
+        +volatilidad_anualizada: float
+        -_calcular_pesos_activos(pesos, rentabilidades) pd.DataFrame
+        -_rendimientos_cartera() pd.Series
+        +resumen() dict
+        +correlacion(t, guardar) pd.DataFrame
+        +report(tasa_libre_riesgo, max_volatilidad, max_drawdown) str
+        +plots_report(mostrar, carpeta, guardar) dict~str, Figure~
+        +simulacion_monte_carlo(...) MonteCarlo
+    }
+    class MonteCarlo {
+        +n_simulaciones: int
+        +horizonte: int
+        +rentabilidades: pd.Series
+        +volatilidades: pd.Series
+        +pesos: pd.Series
+        +trayectorias: pd.DataFrame
+        +valores_finales: pd.Series
+        +percentiles(niveles) pd.DataFrame
+        +var(confianza) float
+        +cvar(confianza) float
+        +resumen() dict
+        +graficar() tuple~Figure~
+        +guardar_graficos(n_trayectorias, carpeta) list~Path~
+    }
+    class informe {
+        <<module>>
+        +valor_cartera(rendimientos, inicio) pd.Series
+        +contribuciones(rendimientos, pesos, valor) pd.Series
+        +dibujar_evolucion(...)
+        +dibujar_drawdown(...)
+        +dibujar_pesos(...)
+        +dibujar_riesgo_rentabilidad(...)
+        +dibujar_contribuciones(...)
+    }
+
+    class MarketToolkitError {
+        <<exception>>
+    }
+    class DataNotFoundException {
+        <<exception>>
+    }
+    class ProviderError {
+        <<exception>>
+    }
+    class RateLimitError {
+        <<exception>>
+    }
+    class DataValidationError {
+        <<exception>>
+    }
+    class InsufficientDataError {
+        <<exception>>
+    }
+
+    Provider <|-- YahooFinanceProvider
+    Provider <|-- PolygonProvider
+    Provider <|-- AlphaVantageProvider
+    Provider <|-- MacroProvider
+    SerieTemporal <|-- FinancialSeries
+    SerieTemporal <|-- MacroSeries
+    MarketToolkitError <|-- DataNotFoundException
+    MarketToolkitError <|-- ProviderError
+    ProviderError <|-- RateLimitError
+    MarketToolkitError <|-- DataValidationError
+    DataValidationError <|-- InsufficientDataError
+
+    FinancialSeries --> TipoActivo : tipo_activo
+    Portfolio o-- "1..*" FinancialSeries : activos
+    MonteCarlo --> FinancialSeries : objetivo
+    MonteCarlo --> Portfolio : objetivo
+    Portfolio ..> MonteCarlo : crea
+    Portfolio ..> informe : plots_report()
+    YahooFinanceProvider ..> FinancialSeries : crea
+    PolygonProvider ..> FinancialSeries : crea
+    AlphaVantageProvider ..> FinancialSeries : crea
+    MacroProvider ..> MacroSeries : crea
+    SerieTemporal ..> DataValidationError : lanza
+    Provider ..> ProviderError : lanza
+```
+
+## Cómo leerlo
+
+| Símbolo | Significado |
+| --- | --- |
+| Flecha con punta de triángulo hueco | Herencia: la clase hija es un caso de la madre |
+| Rombo hueco | Composición: una `Portfolio` agrupa una o varias `FinancialSeries` |
+| Flecha discontinua | Dependencia: una clase crea, usa o lanza la otra |
+| `<<dataclass frozen>>` | Dataclass inmutable: se valida y calcula sus estadísticos al crearse |
+| `<<abstract>>` | Clase abstracta: define la interfaz común de los proveedores |
+| `<<module>>` | Módulo de funciones (no es una clase) |
+
+## Decisiones que refleja
+
+- **Un contrato para todas las fuentes.** Todos los proveedores heredan de `Provider` y
+  `download()` siempre devuelve una lista de series. Añadir una fuente nueva es añadir una
+  subclase, sin tocar los modelos.
+- **Un único tipo de dato estándar.** Venga de donde venga, el precio de un activo es una
+  `FinancialSeries`. Así la cartera, la simulación y los informes no dependen de la fuente.
+- **Series y macro comparten base.** `FinancialSeries` y `MacroSeries` heredan de `SerieTemporal`
+  (índice de fechas, metadatos, validación), pero cada una calcula sus propios estadísticos: de
+  rendimientos en los precios y del nivel en las series macro.
+- **Excepciones propias en jerarquía.** Se pueden capturar todas (`MarketToolkitError`), solo las
+  de las APIs (`ProviderError`) o solo las de validación (`DataValidationError`).
