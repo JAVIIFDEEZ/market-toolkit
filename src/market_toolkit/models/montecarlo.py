@@ -10,9 +10,9 @@ import numpy as np
 import pandas as pd
 from matplotlib.figure import Figure
 
+import market_toolkit.models.portfolio as portfolio
+import market_toolkit.models.series as series
 from market_toolkit.config import DIAS_COTIZACION_ANUAL
-from market_toolkit.exceptions import InsufficientDataError
-from market_toolkit.models.series import FinancialSeries
 
 if TYPE_CHECKING:
     # Solo para las anotaciones: Portfolio usa MonteCarlo y un import real sería circular
@@ -64,7 +64,7 @@ class MonteCarlo:
 
     def __init__(
         self,
-        objetivo: FinancialSeries | Portfolio,
+        objetivo: series.FinancialSeries | portfolio.Portfolio,
         *,
         n_simulaciones: int = 1000,
         horizonte: int = DIAS_COTIZACION_ANUAL,
@@ -93,10 +93,7 @@ class MonteCarlo:
         :param guardar_graficos: `True` para borrar los gráficos de la simulación anterior y
             guardar los de esta en `models/graficos/` (trayectorias.png y distribucion.png).
         """
-        # Una cartera se reconoce por sus precios alineados y sus pesos (sin importar Portfolio)
-        es_cartera = (isinstance(getattr(objetivo, "activos", None), pd.DataFrame)
-                      and isinstance(getattr(objetivo, "pesos", None), pd.DataFrame))
-        if not (isinstance(objetivo, FinancialSeries) or es_cartera):
+        if not isinstance(objetivo, series.FinancialSeries | portfolio.Portfolio):
             raise TypeError(
                 f"Solo se puede simular una FinancialSeries o un Portfolio, no "
                 f"{type(objetivo).__name__}.")
@@ -110,7 +107,7 @@ class MonteCarlo:
         self.rebalanceo = rebalanceo
         self.semilla = semilla
 
-        if isinstance(objetivo, FinancialSeries):
+        if isinstance(objetivo, series.FinancialSeries):
             precios = objetivo.serie_temporal.to_frame()
             # Supuestos por defecto: los estadísticos que la serie calcula al crearse
             historicas = pd.Series({objetivo.activo: objetivo.rentabilidad_anualizada})
@@ -118,15 +115,10 @@ class MonteCarlo:
             self.pesos = None
             por_defecto = float(objetivo.serie_temporal.iloc[-1])
         else:
-            # Mismo calendario que Portfolio.rendimientos(): los días en que un activo no cotiza
-            # se toma su último precio y se descartan las fechas anteriores a que existan todos
-            precios = objetivo.activos.ffill().dropna()
-            historicas, vol_historicas = self._estadisticos_historicos(precios)
-            # Pesos actuales de la cartera (última fila), emparejados por nombre con los precios
-            self.pesos = objetivo.pesos.iloc[-1].reindex(precios.columns).astype(float)
-            if self.pesos.isna().any():
-                faltan = ", ".join(self.pesos.index[self.pesos.isna()])
-                raise ValueError(f"La cartera no tiene pesos actuales para: {faltan}.")
+            precios = objetivo.activos.dropna()
+            historicas = objetivo.metadatos_activos.loc["rentabilidad_anualizada"]
+            vol_historicas = objetivo.metadatos_activos.loc["volatilidad_anualizada"]
+            self.pesos = objetivo.pesos.iloc[-1]  # Pesos actuales de la cartera
             por_defecto = 100.0
         self.rentabilidades = self._aplicar_supuesto(historicas, rentabilidad, "rentabilidad")
         self.volatilidades = self._aplicar_supuesto(vol_historicas, volatilidad, "volatilidad")
@@ -142,22 +134,6 @@ class MonteCarlo:
         self.trayectorias = self._simular()
         if guardar_graficos:
             self.guardar_graficos()
-
-    @staticmethod
-    def _estadisticos_historicos(precios: pd.DataFrame) -> tuple[pd.Series, pd.Series]:
-        """
-        Calcula la rentabilidad y la volatilidad anualizadas de cada activo de una cartera con
-        las mismas fórmulas que `FinancialSeries`, sobre las fechas comunes de la cartera.
-        :param precios: Precios alineados de los activos.
-        :return: Tupla (rentabilidades anuales, volatilidades anuales) por activo.
-        """
-        rendimientos = precios.pct_change(fill_method=None).dropna()
-        if len(rendimientos) < 2:
-            raise InsufficientDataError(
-                "La cartera no tiene suficientes fechas en común para estimar los supuestos.")
-        rentabilidades = (1 + rendimientos.mean()) ** DIAS_COTIZACION_ANUAL - 1
-        volatilidades = rendimientos.std() * np.sqrt(DIAS_COTIZACION_ANUAL)
-        return rentabilidades, volatilidades
 
     @staticmethod
     def _aplicar_supuesto(historico: pd.Series, supuesto: Supuesto, nombre: str) -> pd.Series:
