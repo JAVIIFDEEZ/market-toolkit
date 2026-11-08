@@ -363,7 +363,14 @@ Date
 2025-07-02  0.2015  0.5945  0.2040
 ```
 
-`cartera.pesos` da los pesos con los que empieza cada sesión.
+`cartera.pesos` da los pesos con los que empieza cada sesión. Cómo se leen estas tres filas:
+
+- **30 de junio:** la cartera se creó el 2 de enero con 50/30/20, pero ya no tiene esos pesos porque
+  no se rebalancea. SAN.MC ha subido mucho más que AAPL y por eso pesa más (45 % frente a 34 %).
+- **1 de julio:** es la fecha del cambio, así que empieza la sesión con los pesos indicados, 20/60/20.
+- **2 de julio:** los pesos evolucionan con el rendimiento del 1 de julio (AAPL +1,29 %, SAN.MC
+  -0,38 %, VOD.L +2,52 %). Por ejemplo, AAPL pasa a
+  `0,20 × 1,0129 / (0,20 × 1,0129 + 0,60 × 0,9962 + 0,20 × 1,0252) = 0,2015`.
 
 Si la primera fila de pesos es anterior a los activos, la cartera empieza en la primera sesión con
 los últimos pesos indicados hasta entonces. Si es posterior, la cartera empieza ese día y se
