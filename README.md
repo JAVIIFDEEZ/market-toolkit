@@ -440,6 +440,7 @@ VOD.L   0.08    0.11   1.00
   afecta a la correlación de los otros dos. El título de la imagen indica las sesiones usadas.
 - `correlacion.png` se conserva entre ejecuciones y simulaciones. Solo se borra al crear una
   cartera con otros activos o pesos.
+- Con `guardar=False` solo devuelve la matriz, sin escribir la imagen.
 
 ### Calendario
 
@@ -482,7 +483,8 @@ Con cualquiera de las dos opciones, la cartera empieza cuando existen todos sus 
 
 Todos los precios de la cartera se pasan a **USD** con el tipo de cambio diario de Yahoo Finance
 (`EURUSD=X`, `GBPUSD=X`...), de modo que las rentabilidades incluyen la variación de la divisa. Cada
-activo debe tener su moneda informada.
+activo debe tener su moneda informada. Si un día falta el tipo de cambio se usa el último conocido.
+Si una divisa no tiene ningún dato con el que convertir, se lanza un `ValueError` que la indica.
 
 Las cotizaciones en centésimas se ajustan automáticamente: `GBp` y `GBX` (peniques), `ZAc`
 (céntimos de rand) e `ILA` (agorot). En el ejemplo, `VOD.L` cotiza en peniques y aparece en USD:
@@ -502,6 +504,75 @@ Date
 
 La cartera **no se rebalancea automáticamente**. Los pesos solo vuelven a un valor concreto en las
 fechas indicadas en el `DataFrame` de pesos; el resto de días evolucionan con los precios.
+
+### Informe gráfico
+
+`plots_report()` genera seis gráficos de la cartera sobre todo su periodo, en USD. Los muestra por
+pantalla, los guarda como PNG en `models/graficos/informe/` y devuelve un diccionario
+`{nombre: figura}`:
+
+```python
+figuras = cartera.plots_report()                     # Muestra, guarda y devuelve las figuras
+cartera.plots_report(mostrar=False)                  # Guarda sin abrir ventanas
+cartera.plots_report(guardar=False)                  # Muestra sin escribir ficheros
+cartera.plots_report(carpeta="resultados/cartera")   # Guarda en otra carpeta
+```
+
+| Parámetro | Qué hace | Por defecto |
+|---|---|---|
+| `mostrar` | Muestra los gráficos por pantalla | `True` |
+| `carpeta` | Carpeta de destino de los PNG | `models/graficos/informe/` |
+| `guardar` | Guarda los gráficos como PNG | `True` |
+
+Cada ejecución sustituye los PNG del informe anterior, sin afectar a `correlacion.png` ni a los
+gráficos de la simulación. En las fórmulas, `r(i,t)` es el rendimiento diario del activo `i`,
+`w(i,t)` su peso al empezar la sesión `t`, `r(t) = Σ w(i,t) × r(i,t)` el rendimiento de la cartera
+y `V(t) = 100 × Π (1 + r(t))` su valor en base 100.
+
+**`evolucion`: evolución frente a los activos.** Compara la cartera (línea negra) con cada uno de
+sus activos, todos partiendo de 100, para ver quién ha subido más independientemente de su precio.
+
+- Cartera: `V(t)`, de modo que refleja los pesos y sus cambios.
+- Cada activo: `100 × P(i,t) / P(i,0)`, con `P` el precio en USD.
+
+**`drawdown`: caídas desde máximos.** Muestra cuánto pierde la cartera en cada momento respecto a
+su máximo anterior; 0 % significa que está en máximos. Mide el peor momento que habría vivido un
+inversor y marca la mayor caída del periodo.
+
+- `drawdown(t) = V(t) / máx(V(s), s ≤ t) - 1`
+
+**`pesos`: evolución de los pesos.** Muestra qué parte de la cartera hay en cada activo al empezar
+cada sesión. Entre cambios, los activos que más suben ganan peso. Las líneas verticales marcan las
+sesiones en las que se aplican pesos nuevos.
+
+- En una fecha de cambio, `w(i,t)` es el peso indicado.
+- El resto de sesiones: `w(i,t) = w(i,t-1) × (1 + r(i,t-1)) / Σ w(j,t-1) × (1 + r(j,t-1))`
+
+**`riesgo_rentabilidad`: riesgo frente a rentabilidad.** Sitúa la cartera y cada activo según su
+volatilidad (horizontal) y su rentabilidad (vertical). Muestra si la diversificación compensa:
+cuanto más arriba y a la izquierda, más rentabilidad por unidad de riesgo.
+
+- Rentabilidad anualizada: `(1 + media de los rendimientos diarios)^252 - 1`
+- Volatilidad anualizada: `desviación típica de los rendimientos diarios × √252`
+
+Son los mismos valores de `resumen()` y `metadatos_activos`, así que comparten las limitaciones de
+anualizar con 252 sesiones descritas en *Calendario*.
+
+**`contribucion`: contribución por activo.** Indica cuántos puntos porcentuales (pp) de la
+rentabilidad total aporta cada activo, ordenados de mayor a menor. Tiene en cuenta el peso de cada
+activo y lo que valía la cartera en cada momento. Permite ver de dónde ha salido el resultado: un
+activo puede subir mucho y aportar poco si pesaba poco.
+
+- `C(i) = Σ [V(t-1) / 100] × w(i,t) × r(i,t)`
+- Las contribuciones suman exactamente la rentabilidad total: `Σ C(i) = V(final) / 100 - 1`
+
+**`correlacion`: matriz de correlaciones.** Indica cuánto se mueven juntos los activos, de -1
+(sentido opuesto) a 1 (a la vez). Cuanto más bajas, mayor es la diversificación. Es el mismo
+cálculo que `correlacion()`, con la correlación de Pearson de los rendimientos diarios en USD y las
+fechas comunes de cada pareja, pero sobre todo el periodo de la cartera.
+
+Cada activo mantiene su color entre ejecuciones. Con más de 8 activos, los de menor peso medio se
+agrupan en "Otros" en `evolucion` y `pesos`.
 
 </details>
 

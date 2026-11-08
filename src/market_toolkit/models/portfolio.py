@@ -4,6 +4,7 @@ import hashlib
 import warnings
 from collections.abc import Mapping, Sequence
 from itertools import combinations_with_replacement
+from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
 import matplotlib.pyplot as plt
@@ -11,6 +12,7 @@ import numpy as np
 import pandas as pd
 from matplotlib.figure import Figure
 
+import market_toolkit.models.informe as informe
 import market_toolkit.models.montecarlo as montecarlo
 from market_toolkit.config import DIAS_COTIZACION_ANUAL
 from market_toolkit.exceptions import InsufficientDataError
@@ -165,6 +167,7 @@ class Portfolio:
         cambios = cambios[con_sesion]
         cambios.index = rentabilidades.index[posiciones[con_sesion]]
         cambios = cambios[~cambios.index.duplicated(keep="last")]
+        self._sesiones_cambio = cambios.index
         # Tramos entre cambios de pesos
         tramos = pd.Series(
             rentabilidades.index.isin(cambios.index),
@@ -184,15 +187,21 @@ class Portfolio:
         pesos = self.pesos.iloc[-1] * (1 + rendimientos)
         return pesos / pesos.sum()
 
+    def _rendimientos_cartera(self) -> pd.Series:
+        """
+        Calcula el rendimiento diario de la cartera: el rendimiento de cada activo por el peso
+        con el que empieza la sesión.
+        :return: Serie con los rendimientos diarios de la cartera.
+        """
+        rendimientos_activos = self.precio_activos.pct_change(fill_method=None)
+        return (rendimientos_activos * self.pesos).dropna().sum(axis=1)
+
     def _calcular_estadisticos(self):
         """
         Determina distintos estadísticos de la cartera, como la rentabilidad media diaria, la
         volatilidad, la rentabilidad media anualizada y la volatilidad anualizada.
         """
-        # Rendimiento de la cartera: rendimiento de cada activo por el peso con el que empieza
-        # la sesión
-        rendimientos_activos = self.precio_activos.pct_change(fill_method=None)
-        rendimientos = (rendimientos_activos * self.pesos).dropna().sum(axis=1)
+        rendimientos = self._rendimientos_cartera()
         if len(rendimientos) < 2:
             raise InsufficientDataError(
                 "La cartera no tiene suficientes fechas con precios de sus activos para "
@@ -202,12 +211,14 @@ class Portfolio:
         self.rentabilidad_anualizada = (1 + self.rentabilidad_media) ** DIAS_COTIZACION_ANUAL - 1
         self.volatilidad_anualizada = self.desviacion_tipica * np.sqrt(DIAS_COTIZACION_ANUAL)
 
-    def correlacion(self, t: float) -> pd.DataFrame:
+    def correlacion(self, t: float, guardar: bool = True) -> pd.DataFrame:
         """
         Calcula la correlación de los rendimientos diarios de los activos durante los últimos
-        `t` años de la cartera y guarda la matriz como imagen en `models/graficos/correlacion.png`.
-        Cada pareja de activos se calcula con sus propias fechas comunes, en USD.
+        `t` años de la cartera. Cada pareja de activos se calcula con sus propias fechas comunes,
+        en USD.
         :param t: Años hacia atrás desde la última fecha de la cartera (admite fracciones).
+        :param guardar: `True` para guardar la matriz como imagen en
+            `models/graficos/correlacion.png`.
         :return: DataFrame con la matriz de correlaciones.
         """
         if not t > 0:
@@ -221,6 +232,20 @@ class Portfolio:
                 UserWarning,
                 stacklevel=2,
             )
+        correlaciones, sesiones = self._matriz_correlacion(desde)
+        if guardar:
+            inicio = max(desde, self.precio_activos.index[0])
+            self._guardar_grafico_correlacion(correlaciones, inicio, ultima_fecha, sesiones)
+        return correlaciones
+
+    def _matriz_correlacion(self, desde: pd.Timestamp) -> tuple[pd.DataFrame, list[int]]:
+        """
+        Calcula la correlación de los rendimientos diarios en USD posteriores a una fecha, con
+        las fechas comunes de cada pareja de activos.
+        :param desde: Fecha a partir de la cual se cuentan los rendimientos.
+        :return: Matriz de correlaciones y número de sesiones de cada pareja.
+        """
+        ultima_fecha = self.precio_activos.index[-1]
         # Precios en USD de cada activo con su propio calendario, en el periodo de la cartera
         precios = juntar_series(
             self._series,
@@ -237,16 +262,14 @@ class Portfolio:
             rendimientos = rendimientos[rendimientos.index > desde]
             if len(rendimientos) < 2:
                 raise InsufficientDataError(
-                    f"No hay suficientes sesiones comunes de {activo_a} y {activo_b} en los "
-                    f"últimos {t} años para calcular la correlación.")
+                    f"No hay suficientes sesiones comunes de {activo_a} y {activo_b} desde "
+                    f"{desde.date()} para calcular la correlación.")
             sesiones.append(len(rendimientos))
             if activo_a != activo_b:
                 valor = rendimientos[activo_a].corr(rendimientos[activo_b])
                 correlaciones.loc[activo_a, activo_b] = valor
                 correlaciones.loc[activo_b, activo_a] = valor
-        inicio = max(desde, self.precio_activos.index[0])
-        self._guardar_grafico_correlacion(correlaciones, inicio, ultima_fecha, sesiones)
-        return correlaciones
+        return correlaciones, sesiones
 
     def _borrar_correlacion_si_cambia(self) -> None:
         """Borra `correlacion.png` si se generó con una cartera distinta a esta."""
@@ -260,15 +283,38 @@ class Portfolio:
     def _guardar_grafico_correlacion(self, correlaciones: pd.DataFrame, inicio: pd.Timestamp,
                                      fin: pd.Timestamp, sesiones: list[int]) -> None:
         """
-        Guarda la matriz de correlaciones como una cuadrícula con escala de -1 a 1.
+        Guarda la matriz de correlaciones en `models/graficos/correlacion.png`.
+        :param correlaciones: Matriz de correlaciones.
+        :param inicio: Primera fecha del periodo, para el título.
+        :param fin: Última fecha del periodo, para el título.
+        :param sesiones: Número de sesiones de cada pareja de activos, para el título.
+        """
+        figura = Figure(figsize=self._tamano_correlacion(len(correlaciones)),
+                        facecolor=montecarlo.COLORES["superficie"])
+        self._dibujar_correlacion(figura, correlaciones, inicio, fin, sesiones)
+        montecarlo.CARPETA_GRAFICOS.mkdir(parents=True, exist_ok=True)
+        figura.savefig(montecarlo.CARPETA_GRAFICOS / "correlacion.png", dpi=150,
+                       bbox_inches="tight", facecolor=montecarlo.COLORES["superficie"])
+        (montecarlo.CARPETA_GRAFICOS / "correlacion.firma").write_text(self._firma)
+
+    @staticmethod
+    def _tamano_correlacion(n_activos: int) -> tuple[float, float]:
+        """Tamaño de la figura de correlación según el número de activos."""
+        lado = max(5.0, 1.1 * n_activos + 2)
+        return lado + 1, lado
+
+    @staticmethod
+    def _dibujar_correlacion(figura: Figure, correlaciones: pd.DataFrame, inicio: pd.Timestamp,
+                             fin: pd.Timestamp, sesiones: list[int]) -> None:
+        """
+        Dibuja la matriz de correlaciones como una cuadrícula con escala de -1 a 1.
+        :param figura: Figura vacía en la que dibujar.
         :param correlaciones: Matriz de correlaciones.
         :param inicio: Primera fecha del periodo, para el título.
         :param fin: Última fecha del periodo, para el título.
         :param sesiones: Número de sesiones de cada pareja de activos, para el título.
         """
         n_activos = len(correlaciones)
-        lado = max(5.0, 1.1 * n_activos + 2)
-        figura = Figure(figsize=(lado + 1, lado), facecolor=montecarlo.COLORES["superficie"])
         eje = figura.subplots()
         mapa = plt.get_cmap("plasma")
         imagen = eje.imshow(correlaciones.to_numpy(), cmap=mapa, vmin=-1, vmax=1)
@@ -299,10 +345,65 @@ class Portfolio:
             f"Correlación de rendimientos diarios\n{inicio.date()} a {fin.date()} · "
             f"{n_sesiones} sesiones comunes por pareja",
             loc="left", color=montecarlo.COLORES["texto"], fontsize=12)
-        montecarlo.CARPETA_GRAFICOS.mkdir(parents=True, exist_ok=True)
-        figura.savefig(montecarlo.CARPETA_GRAFICOS / "correlacion.png", dpi=150,
-                       bbox_inches="tight", facecolor=montecarlo.COLORES["superficie"])
-        (montecarlo.CARPETA_GRAFICOS / "correlacion.firma").write_text(self._firma)
+
+    def plots_report(self, mostrar: bool = True, carpeta: str | Path | None = None,
+                     guardar: bool = True) -> dict[str, Figure]:
+        """
+        Genera el informe gráfico de la cartera en todo su periodo: evolución frente a sus
+        activos, drawdown, evolución de los pesos, riesgo y rentabilidad, contribución de cada
+        activo y correlaciones. Al guardarlos, cada PNG sustituye al del informe anterior; no
+        afecta a `correlacion.png` ni a los gráficos de la simulación.
+        :param mostrar: `True` para mostrar los gráficos por pantalla.
+        :param carpeta: Carpeta de destino. Por defecto, `models/graficos/informe/`.
+        :param guardar: `True` para guardar los gráficos como PNG.
+        :return: Diccionario {nombre: figura} con los gráficos.
+        """
+        carpeta = Path(carpeta) if carpeta is not None else (
+            montecarlo.CARPETA_GRAFICOS / "informe")
+        fondo = montecarlo.COLORES["superficie"]
+        crear = plt.figure if mostrar else Figure
+
+        def nueva(tamano: tuple[float, float]) -> Figure:
+            return crear(figsize=tamano, facecolor=fondo, layout="constrained")
+
+        inicio, fin = self.precio_activos.index[[0, -1]]
+        valor = informe.valor_cartera(self._rendimientos_cartera(), inicio)
+        colores = informe.colores_activos(self.pesos)
+        figuras = {nombre: nueva(tamano) for nombre, tamano in {
+            "evolucion": (11, 6),
+            "drawdown": (11, 4),
+            "pesos": (11, 5),
+            "riesgo_rentabilidad": (9, 6),
+            "contribucion": (9, max(3.5, 0.5 * self.precio_activos.shape[1] + 1.5)),
+            "correlacion": self._tamano_correlacion(self.precio_activos.shape[1]),
+        }.items()}
+        informe.dibujar_evolucion(figuras["evolucion"], self.precio_activos, valor, colores)
+        informe.dibujar_drawdown(figuras["drawdown"], valor)
+        informe.dibujar_pesos(figuras["pesos"], self.pesos, colores,
+                              self._sesiones_cambio[self._sesiones_cambio > inicio])
+        informe.dibujar_riesgo_rentabilidad(
+            figuras["riesgo_rentabilidad"],
+            self.metadatos_activos.loc["volatilidad_anualizada"].astype(float),
+            self.metadatos_activos.loc["rentabilidad_anualizada"].astype(float),
+            self.volatilidad_anualizada,
+            self.rentabilidad_anualizada,
+        )
+        rendimientos_activos = self.precio_activos.pct_change(fill_method=None)
+        informe.dibujar_contribuciones(
+            figuras["contribucion"],
+            informe.contribuciones(rendimientos_activos, self.pesos, valor),
+            inicio,
+            fin,
+        )
+        correlaciones, sesiones = self._matriz_correlacion(inicio)
+        self._dibujar_correlacion(figuras["correlacion"], correlaciones, inicio, fin, sesiones)
+        if guardar:
+            carpeta.mkdir(parents=True, exist_ok=True)
+            for nombre, figura in figuras.items():
+                figura.savefig(carpeta / f"{nombre}.png", dpi=150, facecolor=fondo)
+        if mostrar:
+            plt.show()
+        return figuras
 
     def resumen(self) -> dict:
         """
