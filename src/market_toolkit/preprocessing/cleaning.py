@@ -134,6 +134,7 @@ def juntar_series(
         df_fx.index = df_fx.index.tz_localize(None).normalize()
         df_fx = df_fx.sort_index()
         df_fx = df_fx.reindex(df_series.index, method="ffill")
+
         factores = pd.DataFrame(
             {
                 activo: (
@@ -145,5 +146,8 @@ def juntar_series(
             },
             index=df_series.index,
         )
+        mascara = factores.notna().all(axis=1)
+        df_series = df_series.loc[mascara]
+        factores = factores.loc[mascara]
         df_series *= factores
     return df_series
