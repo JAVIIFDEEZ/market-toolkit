@@ -428,8 +428,8 @@ class MonteCarlo:
         """
         carpeta = Path(carpeta)
         carpeta.mkdir(parents=True, exist_ok=True)
-        for anterior in carpeta.glob("*.png"):
-            anterior.unlink()
+        for nombre in ("trayectorias.png", "distribucion.png"):  # Solo los de la simulación
+            (carpeta / nombre).unlink(missing_ok=True)
         # Figuras fuera de pyplot: se guardan sin abrirse ni mostrarse en un notebook
         figuras = {
             "trayectorias.png": self._dibujar_trayectorias(Figure(figsize=(11, 6)),

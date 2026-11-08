@@ -408,6 +408,29 @@ rentabilidad_anualizada    0.184128    1.912644    0.629926
 volatilidad_anualizada     0.325491    0.328106    0.281661
 ```
 
+### Correlación
+
+`correlacion(t=x)` calcula la correlación entre los rendimientos diarios en USD de los activos
+durante los últimos `x` años de la cartera (admite fracciones). Devuelve la matriz y la guarda
+como imagen en `models/graficos/correlacion.png`, con escala de -1 a 1.
+
+```python
+cartera.correlacion(t=0.5)      # Últimos 6 meses
+```
+
+```
+        AAPL  SAN.MC  VOD.L
+AAPL    1.00    0.17   0.08
+SAN.MC  0.17    1.00   0.11
+VOD.L   0.08    0.11   1.00
+```
+
+- Si `x` es mayor que el histórico de la cartera, avisa y usa el periodo disponible.
+- Cada pareja de activos usa **sus propias fechas comunes**, así que el hueco de un activo no
+  afecta a la correlación de los otros dos. El título de la imagen indica las sesiones usadas.
+- `correlacion.png` se conserva entre ejecuciones y simulaciones. Solo se borra al crear una
+  cartera con otros activos o pesos.
+
 ### Calendario
 
 Cada mercado tiene sus festivos. El parámetro `alineacion_temporal` decide qué hacer con las
@@ -423,6 +446,27 @@ cartera = Portfolio(series, pesos, alineacion_temporal="relleno")
 ```
 
 Con cualquiera de las dos opciones, la cartera empieza cuando existen todos sus activos.
+
+**Limitaciones de los calendarios** al mezclar mercados distintos:
+
+- **`"eliminacion"` junta varios días en un solo rendimiento.** Si se elimina una fecha, su
+  movimiento se suma al de la sesión siguiente, y un dato así cuenta como una sola sesión. La
+  volatilidad y la rentabilidad anualizadas pueden salir algo más altas.
+- **`"relleno"` crea días con rendimiento 0.** El activo cerrado repite precio, lo que rebaja un
+  poco su volatilidad y sus correlaciones.
+- **Se anualiza siempre con 252 sesiones**, aunque el calendario común de la cartera tenga más o
+  menos sesiones al año.
+- **Los cierres no son simultáneos.** Europa cierra antes que EE.UU., así que lo que ocurre por la
+  tarde en EE.UU. se refleja en Europa al día siguiente. Las correlaciones diarias entre mercados
+  tienden a salir más bajas de lo real, con cualquiera de las opciones.
+- **Tipo de cambio.** Su cierre diario tampoco coincide con el de cada bolsa y, si falta un día,
+  se usa el último conocido.
+- **Pocas fechas pueden importar mucho.** Un movimiento extremo junto a una fecha eliminada altera
+  los resultados: en una prueba real con activos de EE.UU. y Europa, seis sesiones eliminadas en
+  un año llevaron la correlación AAPL-MSFT de 0,155 a 0,008. Por eso `correlacion()` usa las
+  fechas comunes de cada pareja; los estadísticos de la cartera y la simulación usan las fechas
+  comunes a todos los activos, así que sus correlaciones pueden ser distintas de las de
+  `correlacion()`.
 
 ### Monedas
 
@@ -584,7 +628,7 @@ por debajo del valor inicial), el VaR y el CVaR al 95 %.
 
 ### Gráficos
 
-Al crear el objeto se borran los gráficos anteriores y se guardan dos nuevos en
+Al crear el objeto se sustituyen los dos gráficos de la simulación anterior en
 `models/graficos/` (con `mc.graficar()` también se muestran por pantalla):
 
 - `trayectorias.png`: una muestra de caminos, las bandas de percentiles 5-95 y 25-75, la media y
