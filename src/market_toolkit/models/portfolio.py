@@ -50,6 +50,10 @@ class Portfolio:
             último precio conocido de cada activo.
         """
         # Juntar activos
+<<<<<<< HEAD
+=======
+        self._series = list(activos)
+>>>>>>> origin/Martin-Dev
         self.precio_activos = juntar_series(activos, True, alineacion_temporal)
         # Validar pesos
         if not isinstance(pesos.index, pd.DatetimeIndex):
@@ -71,6 +75,11 @@ class Portfolio:
             raise ValueError(
                 f"Los pesos de cada fecha deben sumar 1. El {incorrectas.index[0].date()} "
                 f"suman {incorrectas.iloc[0]:.4f}.")
+<<<<<<< HEAD
+=======
+        # Los activos y pesos indicados identifican la cartera, aunque se añadan fechas de precios
+        self._firma = hashlib.sha256(pesos.sort_index(axis=1).to_csv().encode()).hexdigest()
+>>>>>>> origin/Martin-Dev
         # Ajuste temporal entre los pesos y los activos
         fechas_activos = self.precio_activos.index[self.precio_activos.index >= pesos.index[0]]
         pesos = pesos.reindex(pesos.index.union(fechas_activos))
@@ -202,18 +211,22 @@ class Portfolio:
         """
         if not t > 0:
             raise ValueError("El número de años `t` debe ser mayor que 0.")
-        ultima_fecha = self.activos.index[-1]
+        ultima_fecha = self.precio_activos.index[-1]
         desde = ultima_fecha - pd.Timedelta(days=t * 365.25)
-        if desde < self.activos.index[0]:
+        if desde < self.precio_activos.index[0]:
             warnings.warn(
-                f"La cartera solo tiene datos desde {self.activos.index[0].date()}. "
+                f"La cartera solo tiene datos desde {self.precio_activos.index[0].date()}. "
                 f"La correlación se calcula con ese periodo, más corto que {t} años.",
                 UserWarning,
                 stacklevel=2,
             )
         # Precios en USD de cada activo con su propio calendario, en el periodo de la cartera
-        precios = juntar_series(self._series, True, None).loc[self.activos.index[0]:ultima_fecha]
-        nombres = list(self.activos.columns)
+        precios = juntar_series(
+            self._series,
+            True,
+            None
+        ).loc[self.precio_activos.index[0]:ultima_fecha]
+        nombres = list(self.precio_activos.columns)
         correlaciones = pd.DataFrame(np.eye(len(nombres)), index=nombres, columns=nombres)
         sesiones = []
         for activo_a, activo_b in combinations_with_replacement(nombres, 2):
@@ -230,7 +243,7 @@ class Portfolio:
                 valor = rendimientos[activo_a].corr(rendimientos[activo_b])
                 correlaciones.loc[activo_a, activo_b] = valor
                 correlaciones.loc[activo_b, activo_a] = valor
-        inicio = max(desde, self.activos.index[0])
+        inicio = max(desde, self.precio_activos.index[0])
         self._guardar_grafico_correlacion(correlaciones, inicio, ultima_fecha, sesiones)
         return correlaciones
 
@@ -307,6 +320,92 @@ class Portfolio:
             "rentabilidad_anualizada": self.rentabilidad_anualizada,
             "volatilidad_anualizada": self.volatilidad_anualizada,
         }
+
+    def report(self, tasa_libre_riesgo: float = 0.0, max_volatilidad: float = 0.30,
+               max_drawdown: float = 0.20) -> str:
+        """Genera un informe Markdown con métricas y advertencias de riesgo.
+        :param tasa_libre_riesgo: Tasa libre de riesgo anual en tanto por uno.
+        :param max_volatilidad: Umbral anual de volatilidad que genera una advertencia.
+        :param max_drawdown: Umbral de drawdown máximo que genera una advertencia.
+        :return: Informe de la cartera en Markdown.
+        """
+        parametros = {
+            "tasa_libre_riesgo": tasa_libre_riesgo,
+            "max_volatilidad": max_volatilidad,
+            "max_drawdown": max_drawdown,
+        }
+        for nombre, valor in parametros.items():
+            if (isinstance(valor, bool)
+                    or not isinstance(valor, (int, float, np.integer, np.floating))
+                    or not np.isfinite(valor)):
+                raise ValueError(f"`{nombre}` debe ser un número finito.")
+        if max_volatilidad < 0 or max_drawdown < 0:
+            raise ValueError("Los umbrales de volatilidad y drawdown deben ser no negativos.")
+
+        rendimientos_activos = self.precio_activos.pct_change(fill_method=None)
+        pesos_anteriores = self.pesos.reindex(self.precio_activos.index).ffill().shift(1)
+        rendimientos = (rendimientos_activos * pesos_anteriores).dropna().sum(axis=1)
+        crecimiento = (1 + rendimientos).cumprod()
+        drawdowns = crecimiento.div(crecimiento.cummax()).sub(1)
+        drawdown_maximo = float(-drawdowns.min())
+        volatilidad_diaria = float(rendimientos.std())
+        if volatilidad_diaria == 0:
+            sharpe = None
+        else:
+            exceso_diario = rendimientos - tasa_libre_riesgo / DIAS_COTIZACION_ANUAL
+            sharpe = float(
+                exceso_diario.mean() / volatilidad_diaria * np.sqrt(DIAS_COTIZACION_ANUAL)
+            )
+
+        pesos_actuales = self.pesos.iloc[-1]
+        advertencias = []
+        if self.volatilidad_anualizada > max_volatilidad:
+            advertencias.append(
+                f"La volatilidad anualizada ({self.volatilidad_anualizada:.2%}) supera "
+                f"el umbral de {max_volatilidad:.2%}."
+            )
+        if drawdown_maximo > max_drawdown:
+            advertencias.append(
+                f"El drawdown maximo ({drawdown_maximo:.2%}) supera "
+                f"el umbral de {max_drawdown:.2%}."
+            )
+        for activo, peso in pesos_actuales[pesos_actuales > 0.50].items():
+            advertencias.append(
+                f"Concentracion elevada en **{activo}**: peso actual de {peso:.2%} "
+                "(umbral: 50.00%)."
+            )
+
+        sharpe_texto = "No disponible (volatilidad cero)" if sharpe is None else f"{sharpe:.2f}"
+        lineas = [
+            "# Informe de cartera",
+            "",
+            "## Resumen",
+            "",
+            "- **Moneda:** USD",
+            f"- **Periodo:** {self.precio_activos.index[0].date()} a "
+            f"{self.precio_activos.index[-1].date()}",
+            f"- **Observaciones de precios:** {len(self.precio_activos)}",
+            f"- **Activos:** {', '.join(map(str, self.precio_activos.columns))}",
+            "",
+            "## Métricas",
+            "",
+            f"- **Rentabilidad anualizada:** {self.rentabilidad_anualizada:.2%}",
+            f"- **Volatilidad anualizada:** {self.volatilidad_anualizada:.2%}",
+            f"- **Sharpe anualizado:** {sharpe_texto}",
+            f"- **Drawdown máximo:** {drawdown_maximo:.2%}",
+            "",
+            "## Pesos actuales",
+            "",
+            "| Activo | Peso |",
+            "| --- | ---: |",
+        ]
+        lineas.extend(f"| {activo} | {peso:.2%} |" for activo, peso in pesos_actuales.items())
+        lineas.extend(["", "## Diagnosticos y advertencias", ""])
+        if advertencias:
+            lineas.extend(f"- {advertencia}" for advertencia in advertencias)
+        else:
+            lineas.append("Sin advertencias con los umbrales indicados.")
+        return "\n".join(lineas)
 
     def simulacion_monte_carlo(self, n_simulaciones: int = 1000,
              horizonte: int = DIAS_COTIZACION_ANUAL,
