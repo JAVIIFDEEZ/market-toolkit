@@ -1,5 +1,264 @@
 # market-toolkit
-El proyecto consistes en la implementación de una toolkit para la extracción, análisis bursátil y gestión de  carteras
+
+[![CI](https://github.com/JAVIIFDEEZ/market-toolkit/actions/workflows/ci.yml/badge.svg)](https://github.com/JAVIIFDEEZ/market-toolkit/actions/workflows/ci.yml)
+![Python](https://img.shields.io/badge/python-3.11%2B-blue)
+
+Toolkit en Python para **descargar, estandarizar y analizar datos bursátiles** y **gestionar y
+simular carteras de inversión**. Taller B1-T1 del máster MIAX.
+
+- **Descarga multifuente:** Yahoo Finance (acciones e índices), Polygon (acciones), Alpha Vantage
+  (oro, plata y Brent) y FRED/ALFRED (series macroeconómicas). Todas las fuentes devuelven el
+  mismo tipo de objeto.
+- **Series validadas con estadísticos automáticos:** `FinancialSeries` y `MacroSeries` comprueban
+  los datos y calculan media, desviación típica, rentabilidad y volatilidad al crearse.
+- **Limpieza y alineación temporal** entre activos con calendarios distintos, con conversión a USD.
+- **Carteras** con pesos que pueden cambiar en el tiempo y que derivan entre rebalanceos.
+- **Simulación de Monte Carlo** de un activo o de una cartera, con las correlaciones entre activos.
+- **Informes:** `report()` en Markdown con métricas y advertencias de riesgo, y `plots_report()`
+  con seis gráficos.
+
+## Índice
+
+- [Requisitos](#requisitos)
+- [Instalación](#instalación)
+- [Configuración de las claves](#configuración-de-las-claves)
+- [Uso rápido](#uso-rápido)
+- [Demo](#demo)
+- [Tests](#tests)
+- [Arquitectura](#arquitectura)
+- [Estructura del proyecto](#estructura-del-proyecto)
+- [Guía de uso](#guía-de-uso)
+- [Autores](#autores)
+
+## Requisitos
+
+- **Python 3.11 o superior** ([descarga](https://www.python.org/downloads/)).
+- **git**.
+- Opcional: claves gratuitas de Polygon, Alpha Vantage y FRED. Yahoo Finance no necesita clave,
+  así que el toolkit funciona sin ninguna (ver [Configuración de las claves](#configuración-de-las-claves)).
+
+## Instalación
+
+**1. Clonar el repositorio**
+
+```bash
+git clone https://github.com/JAVIIFDEEZ/market-toolkit.git
+cd market-toolkit
+```
+
+**2. Crear y activar un entorno virtual**
+
+macOS y Linux:
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+```
+
+Windows (PowerShell):
+
+```powershell
+python -m venv .venv
+.venv\Scripts\Activate.ps1
+```
+
+> Si PowerShell no deja activar el entorno, ejecuta una vez
+> `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned` y vuelve a intentarlo.
+> En `cmd`, el comando es `.venv\Scripts\activate.bat`.
+
+**3. Instalar el paquete con las dependencias de desarrollo**
+
+```bash
+pip install -e ".[dev]"
+```
+
+El modo `-e` (editable) hace que los cambios en `src/` se usen sin reinstalar. `[dev]` añade
+`pytest`, `pytest-cov` y `ruff`.
+
+**4. Comprobar la instalación**
+
+```bash
+pytest
+```
+
+## Configuración de las claves
+
+Copia la plantilla `.env.example` como `.env` y rellena las claves que tengas:
+
+```bash
+cp .env.example .env        # macOS y Linux
+copy .env.example .env      # Windows
+```
+
+| Variable | Fuente | ¿Obligatoria? | Dónde conseguirla |
+| --- | --- | --- | --- |
+| — | Yahoo Finance | No necesita clave | — |
+| `POLYGON_API_KEY` | Polygon (Massive) | Solo para `PolygonProvider` | [polygon.io](https://polygon.io/) |
+| `ALPHAVANTAGE_API_KEY` | Alpha Vantage | Solo para `AlphaVantageProvider` | [alphavantage.co](https://www.alphavantage.co/support/#api-key) |
+| `FRED_API_KEY` | FRED / ALFRED | Solo para `MacroProvider` | [fred.stlouisfed.org](https://fred.stlouisfed.org/docs/api/api_key.html) |
+
+El fichero `.env` está en el `.gitignore`, así que las claves nunca se suben al repositorio. Si
+una clave no está en el `.env`, el proveedor la pide por pantalla al crearse.
+
+## Uso rápido
+
+```python
+import pandas as pd
+
+from market_toolkit.models import Portfolio
+from market_toolkit.providers.providers import YahooFinanceProvider
+
+# 1. Descargar: cada ticker se convierte en una FinancialSeries limpia y validada
+series = YahooFinanceProvider(["AAPL", "MSFT", "JPM"]).download(inicio="2022-01-01", fin="2024-12-31")
+series[0].resumen()  # media, desviación típica, rentabilidad y volatilidad anualizadas...
+
+# 2. Crear una cartera con sus pesos iniciales
+pesos = pd.DataFrame({"AAPL": [0.35], "MSFT": [0.35], "JPM": [0.30]},
+                     index=[pd.Timestamp("2022-01-01")])
+cartera = Portfolio(series, pesos)
+cartera.resumen()
+
+# 3. Simular y generar los informes
+simulacion = cartera.simulacion_monte_carlo(n_simulaciones=5000, semilla=42)
+print(cartera.report(tasa_libre_riesgo=0.04))
+cartera.plots_report()
+```
+
+En la [Guía de uso](#guía-de-uso) se explican todos los proveedores, las opciones de la cartera y
+los parámetros de la simulación.
+
+## Demo
+
+`examples/demo.py` recorre el toolkit de principio a fin: descarga acciones y un índice (y oro y
+el tipo libre de riesgo si hay claves de Alpha Vantage y FRED), crea una cartera, la simula y
+genera los informes.
+
+```bash
+python examples/demo.py              # datos reales
+python examples/demo.py --sin-red    # datos sintéticos, sin conexión
+python examples/demo.py --mostrar    # además, muestra los gráficos por pantalla
+```
+
+Si la descarga falla (sin conexión o con una API caída), la demo sigue con datos sintéticos. Los
+resultados se guardan en `outputs/` (ignorada por git):
+
+| Fichero | Contenido |
+| --- | --- |
+| `outputs/informe.md` | Informe en Markdown de la cartera |
+| `outputs/graficos/*.png` | Los seis gráficos de `plots_report()` |
+| `outputs/montecarlo/*.png` | Trayectorias y distribución del valor final de la simulación |
+
+## Tests
+
+```bash
+pytest           # tests
+ruff check .     # estilo y errores
+```
+
+Los tests usan datos sintéticos generados con semilla fija, así que no necesitan conexión. La
+integración continua de GitHub (`.github/workflows/ci.yml`) ejecuta `ruff` y `pytest` con
+Python 3.11 en cada push y pull request.
+
+## Arquitectura
+
+```mermaid
+flowchart LR
+    usuario(["Usuario:<br/>tickers + fechas"])
+
+    subgraph fuentes["Fuentes externas"]
+        yahoo[("Yahoo Finance")]
+        polygon[("Polygon / Massive")]
+        av[("Alpha Vantage")]
+        fred[("FRED / ALFRED")]
+    end
+
+    subgraph ingesta["1 · Ingesta (providers)"]
+        validar_tk["_validar_input()<br/>¿existe el ticker?"]
+        download["download()<br/>cierres ajustados<br/>índice sin zona horaria"]
+        limpiar["limpiar_serie()<br/>orden · duplicados · inf<br/>negativos · NaN"]
+    end
+
+    subgraph modelos["2 · Modelos"]
+        validacion{"validation<br/>¿serie válida?"}
+        fs["FinancialSeries<br/>estadísticos automáticos"]
+        ms["MacroSeries<br/>nivel: media y desviación"]
+        error["DataValidationError /<br/>InsufficientDataError"]
+    end
+
+    pesos(["Usuario:<br/>DataFrame de pesos"])
+
+    subgraph cartera["3 · Cartera (Portfolio)"]
+        juntar["juntar_series()<br/>alineación temporal<br/>+ conversión a USD"]
+        validar_p["validar pesos<br/>suman 1 · uno por activo"]
+        deriva["_calcular_pesos_activos()<br/>deriva entre rebalanceos"]
+        stats["_rendimientos_cartera()<br/>rentabilidad y volatilidad"]
+    end
+
+    subgraph simulacion["4 · Simulación"]
+        mc["MonteCarlo<br/>GBM + Cholesky"]
+        res["percentiles · VaR · CVaR<br/>probabilidad de pérdida"]
+    end
+
+    subgraph salida["5 · Resultados"]
+        resumen["resumen()"]
+        md["report()<br/>Markdown con métricas<br/>y advertencias"]
+        plots["plots_report()<br/>6 gráficos"]
+        graficos["graficar() /<br/>guardar_graficos()"]
+    end
+
+    usuario --> validar_tk
+    yahoo --> download
+    polygon --> download
+    av --> download
+    fred --> download
+    validar_tk --> download --> limpiar --> validacion
+    validacion -- "sí, precios" --> fs
+    validacion -- "sí, macro" --> ms
+    validacion -- "no" --> error
+    fs --> juntar
+    pesos --> validar_p
+    juntar --> validar_p --> deriva --> stats
+    stats --> resumen
+    stats --> md
+    stats --> plots
+    ms -. "tipo libre de riesgo" .-> md
+    stats --> mc
+    fs -- "un activo" --> mc
+    mc --> res --> graficos
+```
+
+La capa de ingesta (`providers`) está desacoplada del resto: transforma cada fuente en el mismo
+objeto estándar y los modelos nunca importan a los proveedores. Más detalle en
+[docs/architecture](docs/architecture/README.md):
+
+- [Diagrama de clases](docs/architecture/clases.md)
+- [Dependencias entre módulos](docs/architecture/dependencias.md), hoy y en la arquitectura objetivo
+- [Flujo de datos](docs/architecture/flujo.md)
+
+Las decisiones de diseño se justifican en los ADR (*Architecture Decision Records*) de
+[docs/adr](docs/adr/), por ejemplo la
+[validación estricta de las series](docs/adr/0002-validacion-de-inputs.md).
+
+## Estructura del proyecto
+
+```
+market-toolkit/
+├── src/market_toolkit/
+│   ├── config.py              # constantes y claves (.env)
+│   ├── exceptions.py          # jerarquía de excepciones propias
+│   ├── providers/             # ingesta: Yahoo, Polygon, Alpha Vantage y FRED
+│   ├── preprocessing/         # limpieza, alineación temporal y validación
+│   └── models/                # series, cartera, Monte Carlo y gráficos del informe
+├── tests/                     # tests con datos sintéticos (pytest)
+├── examples/demo.py           # demo de extremo a extremo
+├── docs/
+│   ├── architecture/          # diagramas (Mermaid)
+│   └── adr/                   # decisiones de diseño
+├── .env.example               # plantilla de las claves
+└── pyproject.toml             # dependencias y configuración
+```
+
+## Guía de uso
 
 <details>
 <summary><h2>Descarga de Datos</h2></summary>
@@ -341,8 +600,10 @@ Requisitos de los pesos:
 
 ### Cambiar los pesos en el tiempo
 
-Solo se indican las fechas en las que cambian los pesos: cada fila se mantiene hasta la siguiente.
-Con una sola fila, los pesos son fijos durante todo el periodo.
+Solo se indican las fechas en las que cambian los pesos. Cada fila reparte el capital con esos
+pesos y **se aplica ese mismo día**: el rendimiento de esa fecha ya usa los pesos nuevos. Si la
+fecha no tiene sesión, se aplica en la siguiente. Entre una fila y la siguiente no se rebalancea
+y los pesos evolucionan con los precios. Con una sola fila, se compra al inicio y no se toca más.
 
 ```python
 cambios = pd.DataFrame(
@@ -350,17 +611,29 @@ cambios = pd.DataFrame(
     index=pd.to_datetime(["2025-01-02", "2025-07-01"]),
 )
 con_cambio = Portfolio(series, cambios)
-con_cambio.pesos.loc["2025-06-30":"2025-07-01"]
+con_cambio.pesos.loc["2025-06-30":"2025-07-02"].round(4)
 ```
 
 ```
-            AAPL  SAN.MC  VOD.L
-2025-06-30   0.5     0.3    0.2
-2025-07-01   0.2     0.6    0.2
+              AAPL  SAN.MC   VOD.L
+Date
+2025-06-30  0.3413  0.4548  0.2039
+2025-07-01  0.2000  0.6000  0.2000
+2025-07-02  0.2015  0.5945  0.2040
 ```
 
-Si la primera fila de pesos es anterior a los activos, los pesos se recortan. Si es posterior, la
-cartera empieza ese día y se descartan los precios anteriores. En ambos casos se avisa.
+`cartera.pesos` da los pesos con los que empieza cada sesión. Cómo se leen estas tres filas:
+
+- **30 de junio:** la cartera se creó el 2 de enero con 50/30/20, pero ya no tiene esos pesos porque
+  no se rebalancea. SAN.MC ha subido mucho más que AAPL y por eso pesa más (45 % frente a 34 %).
+- **1 de julio:** es la fecha del cambio, así que empieza la sesión con los pesos indicados, 20/60/20.
+- **2 de julio:** los pesos evolucionan con el rendimiento del 1 de julio (AAPL +1,29 %, SAN.MC
+  -0,38 %, VOD.L +2,52 %). Por ejemplo, AAPL pasa a
+  `0,20 × 1,0129 / (0,20 × 1,0129 + 0,60 × 0,9962 + 0,20 × 1,0252) = 0,2015`.
+
+Si la primera fila de pesos es anterior a los activos, la cartera empieza en la primera sesión con
+los últimos pesos indicados hasta entonces. Si es posterior, la cartera empieza ese día y se
+descartan los precios anteriores. En ambos casos se avisa.
 
 ### Estadísticos
 
@@ -371,21 +644,24 @@ cartera.resumen()
 ```
 
 ```
-activos                    ['AAPL', 'SAN.MC', 'VOD.L']
-pesos_actuales             {'AAPL': 0.5, 'SAN.MC': 0.3, 'VOD.L': 0.2}
+precio_activos             ['AAPL', 'SAN.MC', 'VOD.L']
+pesos_actuales             {'AAPL': 0.3350684087088535, 'SAN.MC': 0.4800346937069508, 'VOD.L': 0.1848968975841957}
 moneda                     USD
 inicio                     2025-01-02
 fin                        2025-12-31
 observaciones              245
-media_diaria               0.0019989400659197187
-desviacion_tipica_diaria   0.013793942281151892
-rentabilidad_anualizada    0.6540554165499295
-volatilidad_anualizada     0.21897204525064146
+media_diaria               0.0022004648843354942
+desviacion_tipica_diaria   0.013674283583884875
+rentabilidad_anualizada    0.7400397305550688
+volatilidad_anualizada     0.2170725223195945
 ```
 
+`pesos_actuales` son los pesos al cierre de la última sesión, después de evolucionar con los
+precios.
+
 El rendimiento diario de la cartera es la suma de los rendimientos de cada activo multiplicados
-por sus pesos, los vigentes al cierre de la sesión anterior. Los pesos se aplican a las
-**rentabilidades**, nunca a los precios, así que el precio de cada acción no influye.
+por los pesos con los que empieza esa sesión. Los pesos se aplican a las **rentabilidades**, nunca
+a los precios, así que el precio de cada acción no influye.
 
 | Estadístico | Atributo | Cálculo |
 |---|---|---|
@@ -408,6 +684,30 @@ rentabilidad_anualizada    0.184128    1.912644    0.629926
 volatilidad_anualizada     0.325491    0.328106    0.281661
 ```
 
+### Correlación
+
+`correlacion(t=x)` calcula la correlación entre los rendimientos diarios en USD de los activos
+durante los últimos `x` años de la cartera (admite fracciones). Devuelve la matriz y la guarda
+como imagen en `models/graficos/correlacion.png`, con escala de -1 a 1.
+
+```python
+cartera.correlacion(t=0.5)      # Últimos 6 meses
+```
+
+```
+        AAPL  SAN.MC  VOD.L
+AAPL    1.00    0.17   0.08
+SAN.MC  0.17    1.00   0.11
+VOD.L   0.08    0.11   1.00
+```
+
+- Si `x` es mayor que el histórico de la cartera, avisa y usa el periodo disponible.
+- Cada pareja de activos usa **sus propias fechas comunes**, así que el hueco de un activo no
+  afecta a la correlación de los otros dos. El título de la imagen indica las sesiones usadas.
+- `correlacion.png` se conserva entre ejecuciones y simulaciones. Solo se borra al crear una
+  cartera con otros activos o pesos.
+- Con `guardar=False` solo devuelve la matriz, sin escribir la imagen.
+
 ### Calendario
 
 Cada mercado tiene sus festivos. El parámetro `alineacion_temporal` decide qué hacer con las
@@ -424,17 +724,39 @@ cartera = Portfolio(series, pesos, alineacion_temporal="relleno")
 
 Con cualquiera de las dos opciones, la cartera empieza cuando existen todos sus activos.
 
+**Limitaciones de los calendarios** al mezclar mercados distintos:
+
+- **`"eliminacion"` junta varios días en un solo rendimiento.** Si se elimina una fecha, su
+  movimiento se suma al de la sesión siguiente, y un dato así cuenta como una sola sesión. La
+  volatilidad y la rentabilidad anualizadas pueden salir algo más altas.
+- **`"relleno"` crea días con rendimiento 0.** El activo cerrado repite precio, lo que rebaja un
+  poco su volatilidad y sus correlaciones.
+- **Se anualiza siempre con 252 sesiones**, aunque el calendario común de la cartera tenga más o
+  menos sesiones al año.
+- **Los cierres no son simultáneos.** Europa cierra antes que EE.UU., así que lo que ocurre por la
+  tarde en EE.UU. se refleja en Europa al día siguiente. Las correlaciones diarias entre mercados
+  tienden a salir más bajas de lo real, con cualquiera de las opciones.
+- **Tipo de cambio.** Su cierre diario tampoco coincide con el de cada bolsa y, si falta un día,
+  se usa el último conocido.
+- **Pocas fechas pueden importar mucho.** Un movimiento extremo junto a una fecha eliminada altera
+  los resultados: en una prueba real con activos de EE.UU. y Europa, seis sesiones eliminadas en
+  un año llevaron la correlación AAPL-MSFT de 0,155 a 0,008. Por eso `correlacion()` usa las
+  fechas comunes de cada pareja; los estadísticos de la cartera y la simulación usan las fechas
+  comunes a todos los activos, así que sus correlaciones pueden ser distintas de las de
+  `correlacion()`.
+
 ### Monedas
 
 Todos los precios de la cartera se pasan a **USD** con el tipo de cambio diario de Yahoo Finance
 (`EURUSD=X`, `GBPUSD=X`...), de modo que las rentabilidades incluyen la variación de la divisa. Cada
-activo debe tener su moneda informada.
+activo debe tener su moneda informada. Si un día falta el tipo de cambio se usa el último conocido.
+Si una divisa no tiene ningún dato con el que convertir, se lanza un `ValueError` que la indica.
 
 Las cotizaciones en centésimas se ajustan automáticamente: `GBp` y `GBX` (peniques), `ZAc`
 (céntimos de rand) e `ILA` (agorot). En el ejemplo, `VOD.L` cotiza en peniques y aparece en USD:
 
 ```python
-cartera.activos.tail(2)
+cartera.precio_activos.tail(2)
 ```
 
 ```
@@ -446,7 +768,77 @@ Date
 
 ### Rebalanceo
 
-Pendiente de definir.
+La cartera **no se rebalancea automáticamente**. Los pesos solo vuelven a un valor concreto en las
+fechas indicadas en el `DataFrame` de pesos; el resto de días evolucionan con los precios.
+
+### Informe gráfico
+
+`plots_report()` genera seis gráficos de la cartera sobre todo su periodo, en USD. Los muestra por
+pantalla, los guarda como PNG en `models/graficos/informe/` y devuelve un diccionario
+`{nombre: figura}`:
+
+```python
+figuras = cartera.plots_report()                     # Muestra, guarda y devuelve las figuras
+cartera.plots_report(mostrar=False)                  # Guarda sin abrir ventanas
+cartera.plots_report(guardar=False)                  # Muestra sin escribir ficheros
+cartera.plots_report(carpeta="resultados/cartera")   # Guarda en otra carpeta
+```
+
+| Parámetro | Qué hace | Por defecto |
+|---|---|---|
+| `mostrar` | Muestra los gráficos por pantalla | `True` |
+| `carpeta` | Carpeta de destino de los PNG | `models/graficos/informe/` |
+| `guardar` | Guarda los gráficos como PNG | `True` |
+
+Cada ejecución sustituye los PNG del informe anterior, sin afectar a `correlacion.png` ni a los
+gráficos de la simulación. En las fórmulas, `r(i,t)` es el rendimiento diario del activo `i`,
+`w(i,t)` su peso al empezar la sesión `t`, `r(t) = Σ w(i,t) × r(i,t)` el rendimiento de la cartera
+y `V(t) = 100 × Π (1 + r(t))` su valor en base 100.
+
+**`evolucion`: evolución frente a los activos.** Compara la cartera (línea negra) con cada uno de
+sus activos, todos partiendo de 100, para ver quién ha subido más independientemente de su precio.
+
+- Cartera: `V(t)`, de modo que refleja los pesos y sus cambios.
+- Cada activo: `100 × P(i,t) / P(i,0)`, con `P` el precio en USD.
+
+**`drawdown`: caídas desde máximos.** Muestra cuánto pierde la cartera en cada momento respecto a
+su máximo anterior; 0 % significa que está en máximos. Mide el peor momento que habría vivido un
+inversor y marca la mayor caída del periodo.
+
+- `drawdown(t) = V(t) / máx(V(s), s ≤ t) - 1`
+
+**`pesos`: evolución de los pesos.** Muestra qué parte de la cartera hay en cada activo al empezar
+cada sesión. Entre cambios, los activos que más suben ganan peso. Las líneas verticales marcan las
+sesiones en las que se aplican pesos nuevos.
+
+- En una fecha de cambio, `w(i,t)` es el peso indicado.
+- El resto de sesiones: `w(i,t) = w(i,t-1) × (1 + r(i,t-1)) / Σ w(j,t-1) × (1 + r(j,t-1))`
+
+**`riesgo_rentabilidad`: riesgo frente a rentabilidad.** Sitúa la cartera y cada activo según su
+volatilidad (horizontal) y su rentabilidad (vertical). Muestra si la diversificación compensa:
+cuanto más arriba y a la izquierda, más rentabilidad por unidad de riesgo.
+
+- Rentabilidad anualizada: `(1 + media de los rendimientos diarios)^252 - 1`
+- Volatilidad anualizada: `desviación típica de los rendimientos diarios × √252`
+
+Son los mismos valores de `resumen()` y `metadatos_activos`, así que comparten las limitaciones de
+anualizar con 252 sesiones descritas en *Calendario*.
+
+**`contribucion`: contribución por activo.** Indica cuántos puntos porcentuales (pp) de la
+rentabilidad total aporta cada activo, ordenados de mayor a menor. Tiene en cuenta el peso de cada
+activo y lo que valía la cartera en cada momento. Permite ver de dónde ha salido el resultado: un
+activo puede subir mucho y aportar poco si pesaba poco.
+
+- `C(i) = Σ [V(t-1) / 100] × w(i,t) × r(i,t)`
+- Las contribuciones suman exactamente la rentabilidad total: `Σ C(i) = V(final) / 100 - 1`
+
+**`correlacion`: matriz de correlaciones.** Indica cuánto se mueven juntos los activos, de -1
+(sentido opuesto) a 1 (a la vez). Cuanto más bajas, mayor es la diversificación. Es el mismo
+cálculo que `correlacion()`, con la correlación de Pearson de los rendimientos diarios en USD y las
+fechas comunes de cada pareja, pero sobre todo el periodo de la cartera.
+
+Cada activo mantiene su color entre ejecuciones. Con más de 8 activos, los de menor peso medio se
+agrupan en "Otros" en `evolucion` y `pesos`.
 
 </details>
 
@@ -458,14 +850,14 @@ Pendiente de definir.
 ganar, qué probabilidad hay de perder y cuánto se puede perder en los peores escenarios.
 
 ```python
-from market_toolkit.models.montecarlo import MonteCarlo
+from market_toolkit.simulation.montecarlo import MonteCarlo
 
 # Un activo: se crea el objeto MonteCarlo con la FinancialSeries
 mc = MonteCarlo(aapl, n_simulaciones=5000, horizonte=252, semilla=42)
 mc.resumen()
 
 # Una cartera: se llama al método de Portfolio, que devuelve el MonteCarlo y muestra los gráficos
-mc = cartera.simulacion_monte_carlo(horizonte=504, rentabilidad={"SAN.MC": 0.05}, rebalanceo=False)
+mc = cartera.simulacion_monte_carlo(horizonte=504, rentabilidad={"SAN.MC": 0.05})
 mc.resumen()
 ```
 
@@ -517,11 +909,11 @@ por la diversificación suele ser menor. Las correlaciones siempre son las hist�
 
 **En una cartera**, los activos se simulan a la vez y sus movimientos diarios mantienen las
 **correlaciones históricas** entre ellos (si dos activos suelen subir juntos, en la simulación
-también). Después se combinan con los **pesos actuales** de la cartera (su última fila de pesos).
-El resultado está en USD. En la simulación, el **rebalanceo es un parámetro libre**:
+también). Después se combinan con los **pesos actuales** de la cartera (al cierre de su última
+sesión). El resultado está en USD. Por defecto **no hay rebalanceo**:
 
-- `rebalanceo=True` (por defecto): los pesos se cumplen todos los días.
-- `rebalanceo=False`: se compra al inicio con esos pesos y no se toca la cartera.
+- `rebalanceo=False` (por defecto): se compra al inicio con esos pesos y no se toca la cartera.
+- `rebalanceo=True`: los pesos se restablecen todos los días.
 
 ### Parámetros
 
@@ -531,34 +923,33 @@ El resultado está en USD. En la simulación, el **rebalanceo es un parámetro l
 | `horizonte` | Sesiones a simular (252 = un año) | 252 |
 | `rentabilidad`, `volatilidad` | Media y volatilidad anuales, a elección del usuario. En una cartera, un número para todos los activos o un diccionario por activo | Históricas |
 | `valor_inicial` | Valor de partida | Último precio del activo, o 100 USD en una cartera |
-| `rebalanceo` | Solo carteras, a elección del usuario: `True` cumple los pesos cada día y `False` compra y mantiene | `True` |
+| `rebalanceo` | Solo carteras: `False` compra y mantiene y `True` restablece los pesos cada día | `False` |
 | `semilla` | Fija el azar para obtener siempre el mismo resultado | `None` |
 | `guardar_graficos` | Guarda los gráficos de la simulación | `True` |
 
 Ejemplo con todos los parámetros retocados:
 
 ```python
-from market_toolkit.models.montecarlo import MonteCarlo
+from market_toolkit.simulation.montecarlo import MonteCarlo
 
 # Un activo: supuestos fijados a mano
 mc_activo = MonteCarlo(
-    aapl,                       # FinancialSeries a simular
-    n_simulaciones=10_000,      # 10.000 caminos
-    horizonte=504,              # 2 años de sesiones
-    rentabilidad=0.08,          # 8 % anual esperado
-    volatilidad=0.25,           # 25 % de volatilidad anual
-    valor_inicial=10_000,       # Se parte de 10.000 USD en lugar del último precio
-    semilla=42,                 # Resultado reproducible
-    guardar_graficos=True,      # Borra los gráficos anteriores y guarda los nuevos
+  aapl,  # FinancialSeries a simular
+  n_simulaciones=10_000,  # 10.000 caminos
+  horizonte=504,  # 2 años de sesiones
+  rentabilidad=0.08,  # 8 % anual esperado
+  volatilidad=0.25,  # 25 % de volatilidad anual
+  valor_inicial=10_000,  # Se parte de 10.000 USD en lugar del último precio
+  semilla=42,  # Resultado reproducible
+  guardar_graficos=True,  # Borra los gráficos anteriores y guarda los nuevos
 )
 
-
 # Los resultados también se pueden ajustar
-mc_activo.percentiles((1, 10, 50, 90, 99))   # Percentiles a elección en cada sesión
-mc_activo.var(0.99)                          # VaR con otra confianza
-mc_activo.cvar(0.99)                         # CVaR con otra confianza
-mc_activo.graficar(n_trayectorias=100)       # Mostrar por pantalla con 100 caminos de fondo
-mc_activo.guardar_graficos(n_trayectorias=100, carpeta="mis_graficos")   # Guardar en otra carpeta
+mc_activo.percentiles((1, 10, 50, 90, 99))  # Percentiles a elección en cada sesión
+mc_activo.var(0.99)  # VaR con otra confianza
+mc_activo.cvar(0.99)  # CVaR con otra confianza
+mc_activo.graficar(n_trayectorias=100)  # Mostrar por pantalla con 100 caminos de fondo
+mc_activo.guardar_graficos(n_trayectorias=100, carpeta="mis_graficos")  # Guardar en otra carpeta
 ```
 
 ### Resultados
@@ -584,7 +975,7 @@ por debajo del valor inicial), el VaR y el CVaR al 95 %.
 
 ### Gráficos
 
-Al crear el objeto se borran los gráficos anteriores y se guardan dos nuevos en
+Al crear el objeto se sustituyen los dos gráficos de la simulación anterior en
 `models/graficos/` (con `mc.graficar()` también se muestran por pantalla):
 
 - `trayectorias.png`: una muestra de caminos, las bandas de percentiles 5-95 y 25-75, la media y
@@ -602,3 +993,9 @@ Al crear el objeto se borran los gráficos anteriores y se guardan dos nuevos en
   descargado.
 
 </details>
+
+## Autores
+
+- [JAVIIFDEEZ](https://github.com/JAVIIFDEEZ)
+- [Mgalvaz](https://github.com/Mgalvaz)
+- [galartiker](https://github.com/galartiker)

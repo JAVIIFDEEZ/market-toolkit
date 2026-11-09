@@ -132,7 +132,8 @@ def juntar_series(
         if isinstance(df_fx, pd.Series):
             df_fx = df_fx.to_frame(name=tickers_fx[0])
         df_fx.index = df_fx.index.tz_localize(None).normalize()
-        df_fx = df_fx.sort_index()
+        # Los días sin tipo de cambio usan el último conocido, también si la fecha viene vacía
+        df_fx = df_fx.reindex(columns=tickers_fx).sort_index().ffill()
         df_fx = df_fx.reindex(df_series.index, method="ffill")
         factores = pd.DataFrame(
             {
@@ -145,5 +146,8 @@ def juntar_series(
             },
             index=df_series.index,
         )
+        mascara = factores.notna().all(axis=1)
+        df_series = df_series.loc[mascara]
+        factores = factores.loc[mascara]
         df_series *= factores
     return df_series
