@@ -148,6 +148,9 @@ resultados se guardan en `outputs/` (ignorada por git):
 | `outputs/graficos/*.png` | Los seis gráficos de `plots_report()` |
 | `outputs/montecarlo/*.png` | Trayectorias y distribución del valor final de la simulación |
 
+Por defecto, la librería guarda los gráficos en `models/graficos/`. La demo los guarda en `outputs/`
+porque indica esa ruta con el parámetro `carpeta` de `plots_report()` y `guardar_graficos()`.
+
 ## Tests
 
 ```bash
