@@ -794,6 +794,9 @@ cartera.plots_report(carpeta="resultados/cartera")   # Guarda en otra carpeta
 | `carpeta` | Carpeta de destino de los PNG | `models/graficos/informe/` |
 | `guardar` | Guarda los gráficos como PNG | `True` |
 
+La ruta `models/graficos/informe/` solo se usa si no se indica `carpeta`. Por ejemplo, la
+[demo](#demo) pasa `carpeta="outputs/graficos"` y deja ahí los PNG.
+
 Cada ejecución sustituye los PNG del informe anterior, sin afectar a `correlacion.png` ni a los
 gráficos de la simulación. En las fórmulas, `r(i,t)` es el rendimiento diario del activo `i`,
 `w(i,t)` su peso al empezar la sesión `t`, `r(t) = Σ w(i,t) × r(i,t)` el rendimiento de la cartera
@@ -986,6 +989,10 @@ Al crear el objeto se sustituyen los dos gráficos de la simulación anterior en
   la mediana.
 - `distribucion.png`: histograma del valor final (pérdidas en naranja y ganancias en verde) con
   el valor inicial, la media, la mediana, el VaR 95 % y el VaR 99 %.
+
+La ruta `models/graficos/` es la de por defecto. Para guardarlos en otra carpeta, se crea el objeto
+con `guardar_graficos=False` y se llama a `mc.guardar_graficos(carpeta="...")`. Así lo hace la
+[demo](#demo), que los deja en `outputs/montecarlo/`.
 
 ### Limitaciones
 
