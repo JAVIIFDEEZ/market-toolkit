@@ -1,0 +1,62 @@
+flowchart TB
+    subgraph ingesta["Ingesta"]
+        extractor["extractor.py<br/>DataExtractor"]
+        registry["providers/registry.py<br/>nombre → proveedor"]
+        providers["providers/<br/>Yahoo · Polygon · AlphaVantage · Macro<br/>+ tipos de cambio"]
+    end
+
+    subgraph modelos["Modelos"]
+        series["models/series.py<br/>FinancialSeries · MacroSeries"]
+        fundamentals["models/fundamentals.py<br/>Fundamentales"]
+        portfolio["models/portfolio.py<br/>Portfolio (solo orquesta)"]
+    end
+
+    subgraph prep["Preprocesado"]
+        cleaning["preprocessing/cleaning.py<br/>limpieza y alineación"]
+        validation["preprocessing/validation.py"]
+    end
+
+    subgraph analisis["Análisis"]
+        returns["analytics/returns.py<br/>rendimientos"]
+        risk["analytics/risk.py<br/>Sharpe · drawdown · VaR · beta"]
+    end
+
+    subgraph sim["Simulación"]
+        montecarlo["simulation/montecarlo.py<br/>MonteCarlo"]
+    end
+
+    subgraph salida["Reportes"]
+        markdown["reporting/markdown.py<br/>report()"]
+        plots["reporting/plots.py<br/>plots_report()"]
+    end
+
+    subgraph base["Base común"]
+        config["config.py"]
+        exceptions["exceptions.py"]
+    end
+
+    extractor --> registry --> providers
+    providers --> series
+    providers --> cleaning
+    series --> validation
+    portfolio --> series
+    portfolio --> cleaning
+    portfolio --> risk
+    portfolio --> montecarlo
+    portfolio --> markdown
+    portfolio --> plots
+    risk --> returns
+    montecarlo --> risk
+    markdown --> risk
+    plots --> risk
+
+    providers -.-> config
+    providers -.-> exceptions
+    validation -.-> exceptions
+    risk -.-> config
+
+    series -. "nunca" .-x providers
+    analisis -. "nunca" .-x ingesta
+
+    classDef pendiente fill:#fff4e5,stroke:#e8590c,stroke-width:2px,stroke-dasharray: 5 3
+    class extractor,registry,returns,risk,markdown,plots pendiente
