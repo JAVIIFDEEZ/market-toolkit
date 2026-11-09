@@ -150,6 +150,9 @@ caída), la demo sigue con datos sintéticos. Todos los resultados se guardan en
 | `outputs/graficos/*.png` | Los seis gráficos de `plots_report()` |
 | `outputs/montecarlo/*.png` | Trayectorias y distribución del valor final de la simulación |
 
+Por defecto, la librería guarda los gráficos en `models/graficos/`. La demo los guarda en `outputs/`
+porque indica esa ruta con el parámetro `carpeta` de `plots_report()` y `guardar_graficos()`.
+
 ## Tests
 
 ```bash
@@ -635,16 +638,17 @@ cartera.correlacion(t=0.5)      # Últimos 6 meses
 
 ```
         AAPL  SAN.MC  VOD.L
-AAPL    1.00    0.17   0.08
-SAN.MC  0.17    1.00   0.11
-VOD.L   0.08    0.11   1.00
+AAPL    1.00    0.18   0.08
+SAN.MC  0.18    1.00   0.15
+VOD.L   0.08    0.15   1.00
 ```
 
 - Si `x` es mayor que el histórico de la cartera, avisa y usa el periodo disponible.
-- Cada pareja de activos usa **sus propias fechas comunes**, así que el hueco de un activo no
-  afecta a la correlación de los otros dos. El título de la imagen indica las sesiones usadas.
-- `correlacion.png` se conserva entre ejecuciones y simulaciones. Solo se borra al crear una
-  cartera con otros activos o pesos.
+- Se calcula con **las fechas de la cartera**, las mismas para todas las parejas. Con
+  `"eliminacion"` son las comunes a todos los activos, así que el hueco de un activo también
+  afecta a la correlación de los otros.
+- `correlacion.png` se conserva entre ejecuciones y simulaciones. Se borra al crear una cartera
+  con otros activos, pesos o fechas de precios.
 - Con `guardar=False` solo devuelve la matriz, sin escribir la imagen.
 
 ### Calendario
@@ -679,17 +683,17 @@ Con cualquiera de las dos opciones, la cartera empieza cuando existen todos sus 
   se usa el último conocido.
 - **Pocas fechas pueden importar mucho.** Un movimiento extremo junto a una fecha eliminada altera
   los resultados: en una prueba real con activos de EE.UU. y Europa, seis sesiones eliminadas en
-  un año llevaron la correlación AAPL-MSFT de 0,155 a 0,008. Por eso `correlacion()` usa las
-  fechas comunes de cada pareja; los estadísticos de la cartera y la simulación usan las fechas
-  comunes a todos los activos, así que sus correlaciones pueden ser distintas de las de
-  `correlacion()`.
+  un año llevaron la correlación AAPL-MSFT de 0,155 a 0,008. Los estadísticos de la cartera, la
+  simulación y `correlacion()` usan las mismas fechas de la cartera, así que todos están expuestos
+  a este efecto.
 
 ### Monedas
 
 Todos los precios de la cartera se pasan a **USD** con el tipo de cambio diario de Yahoo Finance
 (`EURUSD=X`, `GBPUSD=X`...), de modo que las rentabilidades incluyen la variación de la divisa. Cada
 activo debe tener su moneda informada. Si un día falta el tipo de cambio se usa el último conocido.
-Si una divisa no tiene ningún dato con el que convertir, se lanza un `ValueError` que la indica.
+Las fechas sin ningún tipo de cambio anterior se descartan sin avisar y, si una divisa no tiene
+ningún dato, la cartera no se puede crear.
 
 Las cotizaciones en centésimas se ajustan automáticamente: `GBp` y `GBX` (peniques), `ZAc`
 (céntimos de rand) e `ILA` (agorot). En el ejemplo, `VOD.L` cotiza en peniques y aparece en USD:
@@ -766,6 +770,9 @@ cartera.plots_report(carpeta="resultados/cartera")   # Guarda en otra carpeta
 | `carpeta` | Carpeta de destino de los PNG | `simulation/graficos/informe/` |
 | `guardar` | Guarda los gráficos como PNG | `True` |
 
+La ruta `models/graficos/informe/` solo se usa si no se indica `carpeta`. Por ejemplo, la
+[demo](#demo) pasa `carpeta="outputs/graficos"` y deja ahí los PNG.
+
 Cada ejecución sustituye los PNG del informe anterior, sin afectar a `correlacion.png` ni a los
 gráficos de la simulación. En las fórmulas, `r(i,t)` es el rendimiento diario del activo `i`,
 `w(i,t)` su peso al empezar la sesión `t`, `r(t) = Σ w(i,t) × r(i,t)` el rendimiento de la cartera
@@ -811,7 +818,7 @@ activo puede subir mucho y aportar poco si pesaba poco.
 **`correlacion`: matriz de correlaciones.** Indica cuánto se mueven juntos los activos, de -1
 (sentido opuesto) a 1 (a la vez). Cuanto más bajas, mayor es la diversificación. Es el mismo
 cálculo que `correlacion()`, con la correlación de Pearson de los rendimientos diarios en USD y las
-fechas comunes de cada pareja, pero sobre todo el periodo de la cartera.
+fechas de la cartera, pero sobre todo su periodo.
 
 Cada activo mantiene su color entre ejecuciones. Con más de 8 activos, los de menor peso medio se
 agrupan en "Otros" en `evolucion` y `pesos`.
@@ -958,6 +965,10 @@ Al crear el objeto se sustituyen los dos gráficos de la simulación anterior en
   la mediana.
 - `distribucion.png`: histograma del valor final (pérdidas en naranja y ganancias en verde) con
   el valor inicial, la media, la mediana, el VaR 95 % y el VaR 99 %.
+
+La ruta `models/graficos/` es la de por defecto. Para guardarlos en otra carpeta, se crea el objeto
+con `guardar_graficos=False` y se llama a `mc.guardar_graficos(carpeta="...")`. Así lo hace la
+[demo](#demo), que los deja en `outputs/montecarlo/`.
 
 ### Limitaciones
 

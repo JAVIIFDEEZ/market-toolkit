@@ -220,8 +220,7 @@ class Portfolio:
     def correlacion(self, t: float, guardar: bool = True) -> pd.DataFrame:
         """
         Calcula la correlación de los rendimientos diarios de los activos durante los últimos
-        `t` años de la cartera. Cada pareja de activos se calcula con sus propias fechas comunes,
-        en USD.
+        `t` años de la cartera, en USD y con las fechas de la cartera.
         :param t: Años hacia atrás desde la última fecha de la cartera (admite fracciones).
         :param guardar: `True` para guardar la matriz como imagen en
             `simulation/graficos/correlacion.png`.
@@ -252,7 +251,7 @@ class Portfolio:
         """Calcula correlaciones por parejas sin guardar archivos ni emitir advertencias.
         :param desde: Límite inferior exclusivo del periodo.
         :param hasta: Límite superior inclusivo del periodo.
-        :return: Matriz de correlaciones y sesiones comunes por pareja.
+        :return: Matriz de correlaciones.
         """
         nombres = list(self.precio_activos.columns)
         correlaciones = pd.DataFrame(np.eye(len(nombres)), index=nombres, columns=nombres)
@@ -339,7 +338,7 @@ class Portfolio:
         barra.outline.set_visible(False)
         eje.set_title(
             f"Correlación de rendimientos diarios\n{inicio.date()} a {fin.date()} · "
-            f"{n_sesiones} sesiones comunes por pareja",
+            f"cartera con {n_sesiones} sesiones en total",
             loc="left", color=montecarlo.COLORES["texto"], fontsize=12)
 
     def plots_report(self, mostrar: bool = True, carpeta: str | Path | None = None,
