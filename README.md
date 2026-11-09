@@ -131,16 +131,18 @@ los parámetros de la simulación.
 
 `examples/demo.py` recorre el toolkit de principio a fin: descarga acciones y un índice (y oro y
 el tipo libre de riesgo si hay claves de Alpha Vantage y FRED), crea una cartera, la simula y
-genera los informes.
+genera los informes. Funciona sin ninguna clave: las claves solo añaden datos extra.
 
 ```bash
-python examples/demo.py              # datos reales
-python examples/demo.py --sin-red    # datos sintéticos, sin conexión
-python examples/demo.py --mostrar    # además, muestra los gráficos por pantalla
+python examples/demo.py                 # datos reales
+python examples/demo.py --sin-red       # datos sintéticos, sin conexión
+python examples/demo.py --sin-ventanas  # no abre los gráficos, solo los guarda
 ```
 
-Si la descarga falla (sin conexión o con una API caída), la demo sigue con datos sintéticos. Los
-resultados se guardan en `outputs/` (ignorada por git):
+Los gráficos se abren en ventanas en el paso al que corresponden (dos de Monte Carlo y seis del
+informe) y la demo continúa al cerrarlas. Si la descarga falla (sin conexión o con una API
+caída), la demo sigue con datos sintéticos. Todos los resultados se guardan en `outputs/`
+(ignorada por git):
 
 | Fichero | Contenido |
 | --- | --- |
@@ -161,71 +163,7 @@ Python 3.11 en cada push y pull request.
 
 ## Arquitectura
 
-```mermaid
-flowchart LR
-    usuario(["Usuario:<br/>tickers + fechas"])
-
-    subgraph fuentes["Fuentes externas"]
-        yahoo[("Yahoo Finance")]
-        polygon[("Polygon / Massive")]
-        av[("Alpha Vantage")]
-        fred[("FRED / ALFRED")]
-    end
-
-    subgraph ingesta["1 · Ingesta (providers)"]
-        validar_tk["_validar_input()<br/>¿existe el ticker?"]
-        download["download()<br/>cierres ajustados<br/>índice sin zona horaria"]
-        limpiar["limpiar_serie()<br/>orden · duplicados · inf<br/>negativos · NaN"]
-    end
-
-    subgraph modelos["2 · Modelos"]
-        validacion{"validation<br/>¿serie válida?"}
-        fs["FinancialSeries<br/>estadísticos automáticos"]
-        ms["MacroSeries<br/>nivel: media y desviación"]
-        error["DataValidationError /<br/>InsufficientDataError"]
-    end
-
-    pesos(["Usuario:<br/>DataFrame de pesos"])
-
-    subgraph cartera["3 · Cartera (Portfolio)"]
-        juntar["juntar_series()<br/>alineación temporal<br/>+ conversión a USD"]
-        validar_p["validar pesos<br/>suman 1 · uno por activo"]
-        deriva["_calcular_pesos_activos()<br/>deriva entre rebalanceos"]
-        stats["_rendimientos_cartera()<br/>rentabilidad y volatilidad"]
-    end
-
-    subgraph simulacion["4 · Simulación"]
-        mc["MonteCarlo<br/>GBM + Cholesky"]
-        res["percentiles · VaR · CVaR<br/>probabilidad de pérdida"]
-    end
-
-    subgraph salida["5 · Resultados"]
-        resumen["resumen()"]
-        md["report()<br/>Markdown con métricas<br/>y advertencias"]
-        plots["plots_report()<br/>6 gráficos"]
-        graficos["graficar() /<br/>guardar_graficos()"]
-    end
-
-    usuario --> validar_tk
-    yahoo --> download
-    polygon --> download
-    av --> download
-    fred --> download
-    validar_tk --> download --> limpiar --> validacion
-    validacion -- "sí, precios" --> fs
-    validacion -- "sí, macro" --> ms
-    validacion -- "no" --> error
-    fs --> juntar
-    pesos --> validar_p
-    juntar --> validar_p --> deriva --> stats
-    stats --> resumen
-    stats --> md
-    stats --> plots
-    ms -. "tipo libre de riesgo" .-> md
-    stats --> mc
-    fs -- "un activo" --> mc
-    mc --> res --> graficos
-```
+![Flujo de datos de market-toolkit](docs/architecture/diagramas/flujo.svg)
 
 La capa de ingesta (`providers`) está desacoplada del resto: transforma cada fuente en el mismo
 objeto estándar y los modelos nunca importan a los proveedores. Más detalle en
@@ -248,11 +186,12 @@ market-toolkit/
 │   ├── exceptions.py          # jerarquía de excepciones propias
 │   ├── providers/             # ingesta: Yahoo, Polygon, Alpha Vantage y FRED
 │   ├── preprocessing/         # limpieza, alineación temporal y validación
-│   └── models/                # series, cartera, Monte Carlo y gráficos del informe
+│   ├── models/                # series, cartera y gráficos del informe
+│   └── simulation/            # simulación de Monte Carlo
 ├── tests/                     # tests con datos sintéticos (pytest)
 ├── examples/demo.py           # demo de extremo a extremo
 ├── docs/
-│   ├── architecture/          # diagramas (Mermaid)
+│   ├── architecture/          # diagramas (código Mermaid e imágenes SVG)
 │   └── adr/                   # decisiones de diseño
 ├── .env.example               # plantilla de las claves
 └── pyproject.toml             # dependencias y configuración
@@ -688,7 +627,7 @@ volatilidad_anualizada     0.325491    0.328106    0.281661
 
 `correlacion(t=x)` calcula la correlación entre los rendimientos diarios en USD de los activos
 durante los últimos `x` años de la cartera (admite fracciones). Devuelve la matriz y la guarda
-como imagen en `models/graficos/correlacion.png`, con escala de -1 a 1.
+como imagen en `simulation/graficos/correlacion.png`, con escala de -1 a 1.
 
 ```python
 cartera.correlacion(t=0.5)      # Últimos 6 meses
@@ -771,10 +710,47 @@ Date
 La cartera **no se rebalancea automáticamente**. Los pesos solo vuelven a un valor concreto en las
 fechas indicadas en el `DataFrame` de pesos; el resto de días evolucionan con los precios.
 
+### Informe en Markdown
+
+`report()` devuelve un informe en Markdown con las métricas de la cartera, sus diagnósticos y
+advertencias de riesgo. Con `ruta`, además lo guarda en un fichero `.md`:
+
+```python
+informe = cartera.report(tasa_libre_riesgo=0.04)       # Texto Markdown
+cartera.report(tasa_libre_riesgo=0.04, ruta="informe.md")  # Además, lo guarda
+```
+
+Secciones del informe:
+
+| Sección | Contenido |
+| --- | --- |
+| Información general | Activos, periodo, observaciones, último rebalanceo y valor final de 100 invertidos |
+| Composición por activo | Peso actual, rentabilidad, volatilidad y contribución acumulada de cada activo |
+| Rentabilidad | Rentabilidad acumulada, CAGR, media diaria y mejor y peor día y mes |
+| Riesgo | Volatilidad, drawdown máximo, Sharpe, Sortino y Expected Shortfall histórico |
+| Diversificación y concentración | Índice HHI, número efectivo de activos, mayor exposición y matriz de correlaciones |
+| Diagnósticos y advertencias | Alertas cuando se supera algún umbral |
+| Fortalezas | Puntos fuertes de la cartera (diversificación, correlación baja, drawdown moderado, Sharpe alto) |
+
+Los umbrales de las advertencias se pueden cambiar:
+
+| Parámetro | Advierte cuando… | Por defecto |
+| --- | --- | --- |
+| `max_volatilidad` | La volatilidad anualizada lo supera | `0.30` |
+| `max_drawdown` | El drawdown máximo lo supera | `0.20` |
+| `max_concentracion` | Un activo pesa más que este valor | `0.50` |
+| `max_correlacion` | La correlación media, o la de una pareja de activos, lo supera | `0.80` |
+| `max_historial` | Hay menos sesiones que este número | `252` |
+| `min_cobertura` | Un activo tiene datos en menos de esta fracción del periodo | `0.90` |
+
+`tasa_libre_riesgo` (anual, en tanto por uno) se usa en el Sharpe y el Sortino, y `confianza_es`
+(`0.95` por defecto) es el nivel del Expected Shortfall. `min_activos_efectivos`,
+`max_correlacion_diversificada` y `min_sharpe` son los umbrales de las fortalezas.
+
 ### Informe gráfico
 
 `plots_report()` genera seis gráficos de la cartera sobre todo su periodo, en USD. Los muestra por
-pantalla, los guarda como PNG en `models/graficos/informe/` y devuelve un diccionario
+pantalla, los guarda como PNG en `simulation/graficos/informe/` y devuelve un diccionario
 `{nombre: figura}`:
 
 ```python
@@ -787,7 +763,7 @@ cartera.plots_report(carpeta="resultados/cartera")   # Guarda en otra carpeta
 | Parámetro | Qué hace | Por defecto |
 |---|---|---|
 | `mostrar` | Muestra los gráficos por pantalla | `True` |
-| `carpeta` | Carpeta de destino de los PNG | `models/graficos/informe/` |
+| `carpeta` | Carpeta de destino de los PNG | `simulation/graficos/informe/` |
 | `guardar` | Guarda los gráficos como PNG | `True` |
 
 Cada ejecución sustituye los PNG del informe anterior, sin afectar a `correlacion.png` ni a los
@@ -845,7 +821,7 @@ agrupan en "Otros" en `evolucion` y `pesos`.
 <details>
 <summary><h2>Simulación</h2></summary>
 
-`MonteCarlo` (en `models/montecarlo.py`) simula **miles de futuros posibles** de un activo
+`MonteCarlo` (en `simulation/montecarlo.py`) simula **miles de futuros posibles** de un activo
 (`FinancialSeries`) o de una cartera (`Portfolio`) y resume qué puede pasar: cuánto se espera
 ganar, qué probabilidad hay de perder y cuánto se puede perder en los peores escenarios.
 
@@ -976,7 +952,7 @@ por debajo del valor inicial), el VaR y el CVaR al 95 %.
 ### Gráficos
 
 Al crear el objeto se sustituyen los dos gráficos de la simulación anterior en
-`models/graficos/` (con `mc.graficar()` también se muestran por pantalla):
+`simulation/graficos/` (con `mc.graficar()` también se muestran por pantalla):
 
 - `trayectorias.png`: una muestra de caminos, las bandas de percentiles 5-95 y 25-75, la media y
   la mediana.
