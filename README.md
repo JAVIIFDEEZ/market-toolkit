@@ -1,3 +1,5 @@
+from market_toolkit.providers.providers import YahooFinanceProvider
+
 # market-toolkit
 
 [![CI](https://github.com/JAVIIFDEEZ/market-toolkit/actions/workflows/ci.yml/badge.svg)](https://github.com/JAVIIFDEEZ/market-toolkit/actions/workflows/ci.yml)
@@ -6,7 +8,7 @@
 Toolkit en Python para **descargar, estandarizar y analizar datos bursátiles** y **gestionar y
 simular carteras de inversión**. Taller B1-T1 del máster MIAX.
 
-- **Descarga multifuente:** Yahoo Finance (acciones e índices), Polygon (acciones), Alpha Vantage
+- **Descarga multifuente:** Yahoo Finance (acciones, índices y ETFs), Polygon (acciones), Alpha Vantage
   (oro, plata y Brent) y FRED/ALFRED (series macroeconómicas). Todas las fuentes devuelven el
   mismo tipo de objeto.
 - **Series validadas con estadísticos automáticos:** `FinancialSeries` y `MacroSeries` comprueban
@@ -211,6 +213,7 @@ validan que existen y `download()` devuelve una **lista de series** ya limpias y
 Las API keys se leen del fichero `.env` (si no están, se piden por pantalla):
 
 ```
+ALPHAVANTAGE_API_KEY=tu_clave
 POLYGON_API_KEY=tu_clave
 FRED_API_KEY=tu_clave
 ```
@@ -218,9 +221,11 @@ FRED_API_KEY=tu_clave
 <details>
 <summary><h3>Acciones / Stocks</h3></summary>
 
-Se descargan con `PolygonProvider` (Polygon.io, ahora Massive). El plan gratuito tiene dos
-limitaciones que el proveedor gestiona solo:
+Se pueden descargar con `YahooFinanceProvider` o `PolygonProvider` (Polygon.io, ahora Massive).
+En esta sección se explica el funcionamiento de `PolygonProvider`, en la siguiente 
+([Índices / Market Index y ETFs](#indices-market-index)) se comenta el de `YahooFinanceProvider`.
 
+El plan gratuito tiene dos limitaciones que el proveedor gestiona solo:
 - Solo cubre los **últimos 2 años**: si se pide una fecha anterior, se recorta y se avisa.
 - Solo permite **5 llamadas por minuto**: espera `pausa` segundos (12 por defecto) entre
   llamadas, así que cada ticker tarda unos 12 s.
@@ -353,10 +358,124 @@ df.tail(3)
 </details>
 
 <details>
-<summary><h3>Índices / Market Index</h3></summary>
+<summary><h3 id="indices-market-index">Índices / Market Index y ETFs</h3></summary>
 
-Pendiente de documentar. El plan gratuito de Polygon no incluye índices; se pueden descargar
-con `YahooFinanceProvider`, que admite acciones e índices (por ejemplo `^GSPC` o `^IBEX`).
+Se pueden descargar con `YahooFinanceProvider`, que admite acciones; índices, que deben empezar por
+el símpolo `^` (por ejemplo `^GSPC` o `^IBEX`); y ETFs. Los tickers que no se correspondan con
+activos almacenados en la base de datos de Yahoo Finance se descartan.
+
+#### Crear el proveedor
+
+```python
+from market_toolkit.providers.providers import YahooFinanceProvider
+
+yahoo = YahooFinanceProvider(["AAPL", "^GSPC", "SPY", "NOEXISTE"])
+print(yahoo)
+```
+
+```
+UserWarning: Los tickers NOEXISTE no son equities, índices o ETFs, o no existen en Yahoo Finance. Se eliminan de los datos de busqueda.
+YahooFinanceProvider object tickers<AAPL, SPY, ^GSPC>
+```
+
+Si no se conoce el ticker de los activos, también se puede buscar por nombre mediante el método `desde_nombres`.
+Si no se encuentra ningún activo con dicho nombre, se descarta.
+
+```python
+yahoo_nombres = YahooFinanceProvider.desde_nombres(["Apple", "S&P 500", "S&P 500 ETF", "SIN_NOMBRE"])
+print(yahoo_nombres)
+```
+
+```
+UserWarning: No se ha encontrado ningún activo con el nombre "SIN_NOMBRE".
+YahooFinanceProvider object tickers<AAPL, SPY, ^GSPC>
+```
+
+#### Descargar
+
+`download()` devuelve una lista de `FinancialSeries` con los cierres ajustados de cada ticker.
+
+```python
+series = yahoo.download()                                   # Histórico máximo de Yahoo Finance (por defecto)
+series = yahoo.download(periodo="6mo")                      # "1d", "5d", "3mo", "6mo", "1y", "2y", "5y", "10y" "max"
+series = yahoo.download(inicio="2025-01-01", fin="2025-06-30")
+series = yahoo.download(fin="2026-01-01", periodo="6mo")    # Del 2025-07-01 al 2026-01-01
+
+for s in yahoo.download():
+    print(s.activo, s.tipo, s.proveedor, s.inicio, s.fin, s.observaciones)
+```
+
+```
+AAPL acción Yahoo Finance 1980-12-12 2026-11-09 11570
+SPY ETF Yahoo Finance 1993-01-29 2026-11-09 8503
+^GSPC índice Yahoo Finance 1927-12-30 2026-11-09 24832
+```
+
+Si solo se indica `inicio` o `fin`, `periodo` calcula la otra fecha; con las dos fechas, se
+ignora.
+
+</details>
+
+<details>
+<summary><h3>Materias Primas: Oro, Plata y Barril de Brent</h3></summary>
+
+Se pueden descargar con `AlphaVantageProvider`. Únicamente admite las materias primas de Oro, Plata y Barril de petróleo de Brent.
+Los tickers que no se correspondan con ninguno de estos activos se descartan.
+
+El plan gratuito tiene dos limitaciones que el proveedor gestiona solo:
+- Solo se permite realizar 25 llamada al día. En caso de superarlas se lanza una excepción `ProviderError`.
+- Solo permite **1 llamada por segundo**: espera `pausa` segundos (1.1 por defecto) entre
+  llamadas.
+
+#### Crear el proveedor
+
+```python
+from market_toolkit.providers.providers import AlphaVantageProvider
+
+alpha = AlphaVantageProvider(["ORO", "BRENT", "TRIGO"])
+print(alpha)
+```
+
+```
+UserWarning: Los tickers TRIGO no son commodities admitidos. Usa: ORO, GOLD, XAU, PLATA, SILVER, XAG, PETRÓLEO, PETROLEO, BRENT.
+AlphaVantageProvider object tickers<BRENT, GOLD>
+```
+
+#### Listado de tickers admitidos
+
+| Ticker   | Identificador del proveedor | Descripción                            |
+|----------|-----------------------------|----------------------------------------|
+| ORO      | GOLD                        | Precio del oro                         |
+| GOLD     | GOLD                        | Precio del oro                         |
+| XAU      | SILVER                      | Precio del oro                         |
+| PLATA    | SILVER                      | Precio del oro                         |
+| SILVER   | SILVER                      | Precio de la plata                     |
+| XAG      | SILVER                      | Precio de la plata                     |
+| PETRÓLEO | BRENT                       | Precio del barril de petróleo de Brent |
+| PETROLEO | BRENT                       | Precio del barril de petróleo de Brent |
+| BRENT    | BRENT                       | Precio del barril de petróleo de Brent |
+
+#### Descargar
+
+`download()` devuelve una lista de `FinancialSeries` con los cierres ajustados de cada ticker.
+
+```python
+series = alpha.download()                                   # Histórico máximo de Alpha Vantage (por defecto)
+series = alpha.download(periodo="6mo")                      # "Xd", "Xmo", "Xy", "max"
+series = alpha.download(inicio="2025-01-01", fin="2025-06-30")
+series = alpha.download(fin="2026-01-01", periodo="6mo")    # Del 2025-07-01 al 2026-01-01
+
+for s in alpha.download():
+    print(s.activo, s.tipo, s.proveedor, s.inicio, s.fin, s.observaciones)
+```
+
+```
+BRENT materia prima Alpha Vantage 1987-05-20 2026-11-03 9122
+GOLD materia prima Alpha Vantage 2012-01-02 2026-11-08 5297
+```
+
+Si solo se indica `inicio` o `fin`, `periodo` calcula la otra fecha; con las dos fechas, se
+ignora.
 
 </details>
 
@@ -532,6 +651,10 @@ pesos = pd.DataFrame(
 )
 cartera = Portfolio(series, pesos)
 ```
+
+Requisitos de los activos:
+
+- Deben ser un activo que se pueda comprar, esto es, una `FinancialSeries` de tipo ACCION, COMMODITY o ETF.
 
 Requisitos de los pesos:
 

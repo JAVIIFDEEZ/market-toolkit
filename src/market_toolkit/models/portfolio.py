@@ -12,10 +12,11 @@ import numpy as np
 import pandas as pd
 from matplotlib.figure import Figure
 
+import market_toolkit.models as models
 import market_toolkit.models.informe as informe
 import market_toolkit.simulation.montecarlo as montecarlo
 from market_toolkit.config import DIAS_COTIZACION_ANUAL
-from market_toolkit.exceptions import InsufficientDataError
+from market_toolkit.exceptions import DataValidationError, InsufficientDataError
 from market_toolkit.preprocessing import juntar_series
 
 if TYPE_CHECKING:
@@ -53,6 +54,18 @@ class Portfolio:
         """
         # Juntar activos
         self._series = list(activos)
+        n_activos = len(activos)
+        activos = list(
+            filter(
+                lambda activo: activo.tipo_activo != models.TipoActivo.INDICE,
+                activos
+            )
+        )
+        if len(activos) != n_activos:
+            raise DataValidationError(
+                "Se han proporcionado índices como activos. "
+                "Considere en su lugar introducir los ETFs referenciados a dichos índices."
+            )
         self.precio_activos = juntar_series(activos, True, alineacion_temporal)
         # Validar pesos
         if not isinstance(pesos.index, pd.DatetimeIndex):
