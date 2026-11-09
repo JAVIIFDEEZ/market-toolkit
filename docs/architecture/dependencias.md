@@ -23,8 +23,11 @@ flowchart TB
         series["models/series.py<br/>SerieTemporal · FinancialSeries<br/>MacroSeries · TipoActivo"]
         fundamentals["models/fundamentals.py<br/>Fundamentales"]
         portfolio["models/portfolio.py<br/>Portfolio"]
-        montecarlo["models/montecarlo.py<br/>MonteCarlo"]
         informe["models/informe.py<br/>gráficos de plots_report()"]
+    end
+
+    subgraph simulacion["Simulación"]
+        montecarlo["simulation/montecarlo.py<br/>MonteCarlo"]
     end
 
     subgraph prep["Preprocesado"]
@@ -80,7 +83,7 @@ de dónde vienen los datos. Las flechas en rojo son los acoplamientos que quedan
 ## Arquitectura objetivo
 
 Cómo quedaría el paquete al rellenar los módulos que hoy están vacíos (`extractor.py`,
-`analytics/`, `simulation/` y `reporting/`). En naranja, lo pendiente.
+`analytics/` y `reporting/`). En naranja, lo pendiente.
 
 ```mermaid
 flowchart TB
@@ -107,7 +110,7 @@ flowchart TB
     end
 
     subgraph sim["Simulación"]
-        montecarlo["simulation/monte_carlo.py<br/>MonteCarlo"]
+        montecarlo["simulation/montecarlo.py<br/>MonteCarlo"]
     end
 
     subgraph salida["Reportes"]
@@ -144,7 +147,7 @@ flowchart TB
     analisis -. "nunca" .-x ingesta
 
     classDef pendiente fill:#fff4e5,stroke:#e8590c,stroke-width:2px,stroke-dasharray: 5 3
-    class extractor,registry,returns,risk,montecarlo,markdown,plots pendiente
+    class extractor,registry,returns,risk,markdown,plots pendiente
 ```
 
 - `Portfolio` solo **orquesta**: delega los cálculos en `analytics`, la simulación en `simulation`

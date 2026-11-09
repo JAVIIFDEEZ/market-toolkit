@@ -15,8 +15,8 @@ from market_toolkit.config import DIAS_COTIZACION_ANUAL
 
 Supuesto = float | Mapping[str, float] | None
 
-# Carpeta donde se guardan los gráficos de la última simulación
-CARPETA_GRAFICOS = Path(__file__).parent / "graficos"
+# Carpeta donde se guardan los gráficos de la simulación y de la cartera
+CARPETA_GRAFICOS = Path(__file__).parents[1] / "models" / "graficos"
 
 # Colores de los gráficos: aqua de claro a oscuro para las bandas de percentiles, negro
 # semitransparente para las trayectorias de muestra, media en negro discontinuo y mediana en azul,

@@ -845,7 +845,7 @@ agrupan en "Otros" en `evolucion` y `pesos`.
 <details>
 <summary><h2>Simulación</h2></summary>
 
-`MonteCarlo` (en `models/montecarlo.py`) simula **miles de futuros posibles** de un activo
+`MonteCarlo` (en `simulation/montecarlo.py`) simula **miles de futuros posibles** de un activo
 (`FinancialSeries`) o de una cartera (`Portfolio`) y resume qué puede pasar: cuánto se espera
 ganar, qué probabilidad hay de perder y cuánto se puede perder en los peores escenarios.
 

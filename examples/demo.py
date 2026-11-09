@@ -26,7 +26,8 @@ if "--mostrar" not in sys.argv:
 import matplotlib.pyplot as plt  # noqa: E402
 
 from market_toolkit import config  # noqa: E402
-from market_toolkit.models import FinancialSeries, MonteCarlo, Portfolio, TipoActivo  # noqa: E402
+from market_toolkit.models import FinancialSeries, Portfolio, TipoActivo  # noqa: E402
+from market_toolkit.simulation import MonteCarlo  # noqa: E402
 
 CARPETA_SALIDA = Path("outputs")
 ACCIONES = ["AAPL", "MSFT", "JPM"]  # Acciones de Yahoo Finance (en USD)
