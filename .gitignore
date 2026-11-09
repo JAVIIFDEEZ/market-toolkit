@@ -229,6 +229,7 @@ outputs/
 
 # Gráficos generados por las simulaciones de Monte Carlo
 src/market_toolkit/models/graficos/
+src/market_toolkit/simulation/graficos/
 
 # Scripts locales de validación
 validacion/

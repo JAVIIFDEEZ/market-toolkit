@@ -2,11 +2,13 @@
 Demo de extremo a extremo de market-toolkit: descarga, cartera, Monte Carlo e informes.
 
 Uso, desde la raíz del repositorio:
-    python examples/demo.py              # datos reales (Yahoo Finance y, si hay claves, más)
-    python examples/demo.py --sin-red    # datos sintéticos, sin conexión
-    python examples/demo.py --mostrar    # además, muestra los gráficos por pantalla
+    python examples/demo.py                 # datos reales (Yahoo Finance y, si hay claves, más)
+    python examples/demo.py --sin-red       # datos sintéticos, sin conexión
+    python examples/demo.py --sin-ventanas  # no abre los gráficos, solo los guarda
 
-Los resultados se guardan en la carpeta `outputs/` (ignorada por git):
+Por defecto, los gráficos se abren en ventanas en el paso al que corresponden: la demo sigue
+cuando se cierran. Además, todos los resultados se guardan en la carpeta `outputs/` (ignorada
+por git):
     outputs/informe.md              informe en Markdown de la cartera
     outputs/graficos/*.png          gráficos del informe (plots_report)
     outputs/montecarlo/*.png        trayectorias y distribución de la simulación
@@ -20,14 +22,15 @@ import matplotlib
 import numpy as np
 import pandas as pd
 
-if "--mostrar" not in sys.argv:
+MOSTRAR_GRAFICOS = "--sin-ventanas" not in sys.argv
+if not MOSTRAR_GRAFICOS:
     matplotlib.use("Agg")  # Sin ventanas: los gráficos solo se guardan
 
 import matplotlib.pyplot as plt  # noqa: E402
 
 from market_toolkit import config  # noqa: E402
 from market_toolkit.models import FinancialSeries, Portfolio, TipoActivo  # noqa: E402
-from market_toolkit.simulation import MonteCarlo
+from market_toolkit.simulation import MonteCarlo  # noqa: E402
 
 CARPETA_SALIDA = Path("outputs")
 ACCIONES = ["AAPL", "MSFT", "JPM"]  # Acciones de Yahoo Finance (en USD)
@@ -43,6 +46,11 @@ def titulo(texto):
     print("=" * 70)
     print(texto)
     print("=" * 70)
+
+
+def avisar_ventanas(cantidad):
+    print()
+    print(f"Se abren {cantidad} gráficos. Cierra las ventanas para continuar con la demo...")
 
 
 def mostrar_resumen(serie):
@@ -158,6 +166,11 @@ def main():
     print(f"Probabilidad de pérdida:  {resultado['probabilidad_perdida']:.1%}")
     print(f"VaR 95 %:                 {resultado['var_95']:.1%}")
     print(f"CVaR 95 %:                {resultado['cvar_95']:.1%}")
+    print(f"Gráficos guardados en: {CARPETA_SALIDA / 'montecarlo'}")
+    if MOSTRAR_GRAFICOS:
+        avisar_ventanas(2)
+        simulacion.graficar()  # Trayectorias y distribución del valor final
+        plt.close("all")
 
     # -----------------------------------------------------------------------
     # 4. Informes: Markdown y gráficos
@@ -167,16 +180,18 @@ def main():
     ruta_informe = CARPETA_SALIDA / "informe.md"
     ruta_informe.write_text(informe, encoding="utf-8")
     print(f"Informe Markdown: {ruta_informe}")
-    mostrar = "--mostrar" in sys.argv
-    figuras = cartera.plots_report(mostrar=False, carpeta=CARPETA_SALIDA / "graficos")
-    print(f"Gráficos del informe ({len(figuras)}): {CARPETA_SALIDA / 'graficos'}")
-    print(f"Gráficos de Monte Carlo: {CARPETA_SALIDA / 'montecarlo'}")
-    if mostrar:
-        simulacion.graficar()
-    plt.close("all")
-
     print()
     print(informe)
+
+    # Evolución, drawdown, pesos, riesgo-rentabilidad, contribución y correlación
+    print()
+    print(f"Gráficos del informe guardados en: {CARPETA_SALIDA / 'graficos'}")
+    if MOSTRAR_GRAFICOS:
+        avisar_ventanas(6)
+    cartera.plots_report(mostrar=MOSTRAR_GRAFICOS, carpeta=CARPETA_SALIDA / "graficos")
+    plt.close("all")
+    print()
+    print(f"Demo terminada. Todos los resultados están en la carpeta {CARPETA_SALIDA}/")
 
 
 if __name__ == "__main__":

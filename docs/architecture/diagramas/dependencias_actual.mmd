@@ -1,0 +1,64 @@
+flowchart TB
+    subgraph externas["Librerías y APIs externas"]
+        yf[("yfinance")]
+        massive[("massive<br/>(Polygon)")]
+        fredapi[("fredapi<br/>(FRED / ALFRED)")]
+        req[("requests<br/>(Alpha Vantage)")]
+        mpl[("matplotlib")]
+    end
+
+    subgraph ingesta["Ingesta"]
+        providers["providers/providers.py<br/>Provider · Yahoo · Polygon<br/>AlphaVantage · Macro"]
+    end
+
+    subgraph modelos["Modelos"]
+        series["models/series.py<br/>SerieTemporal · FinancialSeries<br/>MacroSeries · TipoActivo"]
+        fundamentals["models/fundamentals.py<br/>Fundamentales"]
+        portfolio["models/portfolio.py<br/>Portfolio"]
+        informe["models/informe.py<br/>gráficos de plots_report()"]
+    end
+
+    subgraph sim["Simulación"]
+        montecarlo["simulation/montecarlo.py<br/>MonteCarlo"]
+    end
+
+    subgraph prep["Preprocesado"]
+        cleaning["preprocessing/cleaning.py<br/>limpiar_serie · limpiar_dataframe<br/>juntar_series"]
+        validation["preprocessing/validation.py<br/>validar_serie_precios · validar_serie_macro"]
+    end
+
+    subgraph base["Base común"]
+        config["config.py<br/>constantes y API keys (.env)"]
+        exceptions["exceptions.py<br/>MarketToolkitError y derivadas"]
+    end
+
+    providers --> series
+    providers --> cleaning
+    providers --> yf
+    providers --> massive
+    providers --> fredapi
+    providers --> req
+    series --> validation
+    portfolio --> cleaning
+    portfolio --> informe
+    portfolio --> montecarlo
+    montecarlo --> portfolio
+    informe --> montecarlo
+    montecarlo --> series
+    montecarlo --> mpl
+    portfolio --> mpl
+    informe --> mpl
+    cleaning -- "tipos de cambio a USD" --> yf
+
+    providers -.-> config
+    providers -.-> exceptions
+    series -.-> config
+    portfolio -.-> config
+    portfolio -.-> exceptions
+    montecarlo -.-> config
+    validation -.-> config
+    validation -.-> exceptions
+
+    series -. "nunca" .-x providers
+
+    linkStyle 9,10,16 stroke:#d03b3b,stroke-width:2px

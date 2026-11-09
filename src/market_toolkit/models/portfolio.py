@@ -223,7 +223,7 @@ class Portfolio:
         `t` años de la cartera, en USD y con las fechas de la cartera.
         :param t: Años hacia atrás desde la última fecha de la cartera (admite fracciones).
         :param guardar: `True` para guardar la matriz como imagen en
-            `models/graficos/correlacion.png`.
+            `simulation/graficos/correlacion.png`.
         :return: DataFrame con la matriz de correlaciones.
         """
         if not t > 0:
@@ -282,7 +282,7 @@ class Portfolio:
     def _guardar_grafico_correlacion(self, correlaciones: pd.DataFrame, inicio: pd.Timestamp,
                                      fin: pd.Timestamp) -> None:
         """
-        Guarda la matriz de correlaciones en `models/graficos/correlacion.png`.
+        Guarda la matriz de correlaciones en `simulation/graficos/correlacion.png`.
         :param correlaciones: Matriz de correlaciones.
         :param inicio: Primera fecha del periodo, para el título.
         :param fin: Última fecha del periodo, para el título.
@@ -349,7 +349,7 @@ class Portfolio:
         activo y correlaciones. Al guardarlos, cada PNG sustituye al del informe anterior; no
         afecta a `correlacion.png` ni a los gráficos de la simulación.
         :param mostrar: `True` para mostrar los gráficos por pantalla.
-        :param carpeta: Carpeta de destino. Por defecto, `models/graficos/informe/`.
+        :param carpeta: Carpeta de destino. Por defecto, `simulation/graficos/informe/`.
         :param guardar: `True` para guardar los gráficos como PNG.
         :return: Diccionario {nombre: figura} con los gráficos.
         """
@@ -739,7 +739,7 @@ class Portfolio:
             `True` para mantener los pesos constantes cada día (rebalanceo diario).
         :param semilla: Semilla del generador aleatorio, para obtener resultados reproducibles.
         :param guardar_graficos: `True` para borrar los gráficos de la simulación anterior y
-            guardar los de esta en `models/graficos/` (trayectorias.png y distribucion.png).
+            guardar los de esta en `simulation/graficos/` (trayectorias.png y distribucion.png).
         :return: El objeto MonteCarlo con los resultados de la simulación.
         """
         sim = montecarlo.MonteCarlo(
