@@ -107,8 +107,7 @@ una clave no está en el `.env`, el proveedor la pide por pantalla al crearse.
 ```python
 import pandas as pd
 
-from market_toolkit.models import Portfolio
-from market_toolkit.providers.providers import YahooFinanceProvider
+from market_toolkit import Portfolio, YahooFinanceProvider
 
 # 1. Descargar: cada ticker se convierte en una FinancialSeries limpia y validada
 series = YahooFinanceProvider(["AAPL", "MSFT", "JPM"]).download(inicio="2022-01-01", fin="2024-12-31")
@@ -126,6 +125,8 @@ print(cartera.report(tasa_libre_riesgo=0.04))
 cartera.plots_report()
 ```
 
+Las clases principales se importan directamente desde `market_toolkit` (proveedores, series,
+`Portfolio`, `MonteCarlo` y excepciones), y la versión instalada está en `market_toolkit.__version__`.
 En la [Guía de uso](#guía-de-uso) se explican todos los proveedores, las opciones de la cartera y
 los parámetros de la simulación.
 
@@ -158,13 +159,17 @@ porque indica esa ruta con el parámetro `carpeta` de `plots_report()` y `guarda
 ## Tests
 
 ```bash
-pytest           # tests
-ruff check .     # estilo y errores
+pytest                              # tests
+pytest --cov=market_toolkit         # tests con informe de cobertura
+ruff check .                        # estilo y errores
 ```
 
-Los tests usan datos sintéticos generados con semilla fija, así que no necesitan conexión. La
-integración continua de GitHub (`.github/workflows/ci.yml`) ejecuta `ruff` y `pytest` con
-Python 3.11 en cada push y pull request.
+Los tests usan datos sintéticos generados con semilla fija y sustituyen cada API por respuestas
+simuladas, así que no necesitan conexión ni claves. Cubren los proveedores, la limpieza, la
+validación, las series, la cartera, Monte Carlo, los informes y la demo completa.
+
+La integración continua de GitHub (`.github/workflows/ci.yml`) ejecuta `ruff` y los tests con
+cobertura en Python 3.11, 3.12 y 3.13 en cada push y pull request.
 
 ## Arquitectura
 
@@ -179,8 +184,13 @@ objeto estándar y los modelos nunca importan a los proveedores. Más detalle en
 - [Flujo de datos](docs/architecture/flujo.md)
 
 Las decisiones de diseño se justifican en los ADR (*Architecture Decision Records*) de
-[docs/adr](docs/adr/), por ejemplo la
-[validación estricta de las series](docs/adr/0002-validacion-de-inputs.md).
+[docs/adr](docs/adr/):
+
+| ADR | Decisión |
+| --- | --- |
+| [0001](docs/adr/0001-fuentes-de-datos.md) | Fuentes de datos, cómo se estandarizan y sus limitaciones |
+| [0002](docs/adr/0002-validacion-de-inputs.md) | Validación estricta de las series en lugar de admitir cualquier input |
+| [0003](docs/adr/0003-portfolio-como-clase.md) | `Portfolio` como clase normal y no como dataclass |
 
 ## Estructura del proyecto
 
