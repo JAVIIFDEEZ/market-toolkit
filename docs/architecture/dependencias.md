@@ -1,7 +1,7 @@
 # Dependencias entre módulos
 
-Cada flecha `A → B` significa «A importa B». Las líneas discontinuas son dependencias de la base
-común (`config` y `exceptions`), que cualquier módulo puede usar.
+Cada flecha `A → B` significa «A importa B». Las líneas discontinuas indican que una capa usa la
+base común (`config` y `exceptions`), que pueden usar todas.
 
 ## Estado actual
 
@@ -9,12 +9,15 @@ común (`config` y `exceptions`), que cualquier módulo puede usar.
 
 Código fuente: [`diagramas/dependencias_actual.mmd`](diagramas/dependencias_actual.mmd)
 
-La regla principal se cumple: **`models` nunca importa `providers`**, así que los modelos no saben
-de dónde vienen los datos. Las flechas en rojo son los acoplamientos que quedan por resolver:
+La regla principal se cumple: **ningún módulo de `models`, `simulation` ni `preprocessing`
+importa `providers`**, así que los modelos no saben de dónde vienen los datos. La demo y el
+cuaderno de la presentación usan el paquete igual que lo haría cualquier usuario.
+
+Las flechas en rojo son los acoplamientos que quedan por resolver:
 
 | Acoplamiento | Por qué conviene quitarlo |
 | --- | --- |
-| `models/portfolio` ↔ `simulation/montecarlo` (y `informe` → `montecarlo`) | Los módulos se importan entre sí, ahora además entre dos paquetes distintos. Funciona porque se importan como módulo y no por nombre, pero cualquier cambio en el orden de los imports puede romperlo y hace difícil probarlos por separado. `informe` solo importa `montecarlo` para reutilizar sus colores y el estilo de los ejes |
+| Ciclo `portfolio` → `informe` → `montecarlo` → `portfolio` | Los tres módulos se importan entre sí, y además entre dos paquetes (`models` y `simulation`). Funciona porque se importan como módulo y no por nombre, pero cualquier cambio en el orden de los imports puede romperlo y hace difícil probarlos por separado. `montecarlo` solo importa `portfolio` para comprobar el tipo del objeto que simula, e `informe` solo importa `montecarlo` para reutilizar sus colores y el estilo de los ejes |
 | `cleaning` → `yfinance` | El preprocesado descarga tipos de cambio de Yahoo para pasar la cartera a USD. Crear una `Portfolio` con activos que no estén en USD llama a internet aunque los precios vengan de otra fuente |
 
 ## Arquitectura objetivo

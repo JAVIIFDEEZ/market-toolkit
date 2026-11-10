@@ -1,10 +1,7 @@
 flowchart TB
-    subgraph externas["Librerías y APIs externas"]
-        yf[("yfinance")]
-        massive[("massive<br/>(Polygon)")]
-        fredapi[("fredapi<br/>(FRED / ALFRED)")]
-        req[("requests<br/>(Alpha Vantage)")]
-        mpl[("matplotlib")]
+    subgraph uso["Uso del paquete"]
+        demo["examples/demo.py<br/>demo de extremo a extremo"]
+        notebook["examples/demo.ipynb<br/>cuaderno de la presentación"]
     end
 
     subgraph ingesta["Ingesta"]
@@ -12,10 +9,10 @@ flowchart TB
     end
 
     subgraph modelos["Modelos"]
-        series["models/series.py<br/>SerieTemporal · FinancialSeries<br/>MacroSeries · TipoActivo"]
-        fundamentals["models/fundamentals.py<br/>Fundamentales"]
         portfolio["models/portfolio.py<br/>Portfolio"]
         informe["models/informe.py<br/>gráficos de plots_report()"]
+        series["models/series.py<br/>SerieTemporal · FinancialSeries<br/>MacroSeries · TipoActivo"]
+        fundamentals["models/fundamentals.py<br/>Fundamentales (sin uso)"]
     end
 
     subgraph sim["Simulación"]
@@ -32,33 +29,52 @@ flowchart TB
         exceptions["exceptions.py<br/>MarketToolkitError y derivadas"]
     end
 
+    subgraph externas["Librerías y APIs externas"]
+        yf[("yfinance")]
+        massive[("massive<br/>(Polygon)")]
+        fredapi[("fredapi<br/>(FRED / ALFRED)")]
+        req[("requests<br/>(Alpha Vantage)")]
+        mpl[("matplotlib")]
+    end
+
+    %% Uso
+    demo --> providers
+    demo --> portfolio
+    demo --> montecarlo
+    notebook --> providers
+    notebook --> portfolio
+    notebook --> montecarlo
+
+    %% Ingesta
     providers --> series
     providers --> cleaning
     providers --> yf
     providers --> massive
     providers --> fredapi
     providers --> req
-    series --> validation
-    portfolio --> cleaning
-    portfolio --> informe
+
+    %% Modelos y simulación (las tres primeras forman un ciclo)
     portfolio --> montecarlo
     montecarlo --> portfolio
     informe --> montecarlo
+    portfolio --> informe
+    portfolio --> series
+    portfolio --> cleaning
     montecarlo --> series
-    montecarlo --> mpl
+    series --> validation
+
+    %% Gráficos
     portfolio --> mpl
     informe --> mpl
+    montecarlo --> mpl
+
+    %% Acoplamiento del preprocesado con una fuente de datos
     cleaning -- "tipos de cambio a USD" --> yf
 
-    providers -.-> config
-    providers -.-> exceptions
-    series -.-> config
-    portfolio -.-> config
-    portfolio -.-> exceptions
-    montecarlo -.-> config
-    validation -.-> config
-    validation -.-> exceptions
+    %% Base común: la pueden usar todas las capas
+    ingesta -. "config · exceptions" .-> base
+    modelos -.-> base
+    sim -.-> base
+    prep -.-> base
 
-    series -. "nunca" .-x providers
-
-    linkStyle 9,10,16 stroke:#d03b3b,stroke-width:2px
+    linkStyle 12,13,14,15,23 stroke:#d03b3b,stroke-width:2px

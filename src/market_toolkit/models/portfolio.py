@@ -507,9 +507,9 @@ class Portfolio:
         if max_volatilidad < 0 or max_drawdown < 0:
             raise ValueError("Los umbrales de volatilidad y drawdown deben ser no negativos.")
 
-        rendimientos_activos = self.precio_activos.pct_change()
-        pesos_anteriores = self.pesos.shift(1)
-        contribuciones_diarias = (rendimientos_activos * pesos_anteriores).dropna()
+        rendimientos_activos = self.precio_activos.pct_change(fill_method=None)
+        # `self.pesos` ya son los pesos con los que empieza cada sesión: no se desplazan otra vez
+        contribuciones_diarias = (rendimientos_activos * self.pesos).dropna()
         rendimientos = self.rendimiento
 
         factores_crecimiento = 1 + rendimientos

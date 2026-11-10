@@ -1,43 +1,50 @@
-flowchart LR
-    usuario(["Usuario:<br/>tickers + fechas"])
+flowchart TB
+    usuario(["Usuario: tickers o nombres<br/>(desde_nombres) + fechas"])
 
     subgraph fuentes["Fuentes externas"]
-        yahoo[("Yahoo Finance")]
-        polygon[("Polygon / Massive")]
-        av[("Alpha Vantage")]
-        fred[("FRED / ALFRED")]
+        direction LR
+        yahoo[("Yahoo Finance<br/>acciones · índices · ETF")]
+        polygon[("Polygon / Massive<br/>acciones")]
+        av[("Alpha Vantage<br/>oro · plata · Brent")]
+        fred[("FRED / ALFRED<br/>series macro")]
     end
 
     subgraph ingesta["1 · Ingesta (providers)"]
-        validar_tk["_validar_input()<br/>¿existe el ticker?"]
+        direction LR
+        validar_tk["_validar_input()<br/>¿existe y es de un tipo admitido?"]
         download["download()<br/>cierres ajustados<br/>índice sin zona horaria"]
         limpiar["limpiar_serie()<br/>orden · duplicados · inf<br/>negativos · NaN"]
     end
 
-    subgraph modelos["2 · Modelos"]
+    subgraph modelos["2 · Modelos (series)"]
+        direction LR
         validacion{"validation<br/>¿serie válida?"}
         fs["FinancialSeries<br/>estadísticos automáticos"]
-        ms["MacroSeries<br/>nivel: media y desviación"]
+        ms["MacroSeries<br/>media y desviación del nivel"]
         error["DataValidationError /<br/>InsufficientDataError"]
     end
 
-    pesos(["Usuario:<br/>DataFrame de pesos"])
+    pesos(["Usuario: DataFrame de pesos<br/>(una fila por rebalanceo)"])
 
     subgraph cartera["3 · Cartera (Portfolio)"]
+        direction LR
+        sin_indices{"¿algún índice?"}
         juntar["juntar_series()<br/>alineación temporal<br/>+ conversión a USD"]
         validar_p["validar pesos<br/>suman 1 · uno por activo"]
         deriva["_calcular_pesos_activos()<br/>deriva entre rebalanceos"]
         stats["_rendimientos_cartera()<br/>rentabilidad y volatilidad"]
     end
 
-    subgraph simulacion["4 · Simulación"]
+    subgraph simulacion["4 · Simulación (simulation)"]
+        direction LR
         mc["MonteCarlo<br/>GBM + Cholesky"]
         res["percentiles · VaR · CVaR<br/>probabilidad de pérdida"]
     end
 
     subgraph salida["5 · Resultados"]
+        direction LR
         resumen["resumen()"]
-        md["report()<br/>Markdown con métricas<br/>y advertencias"]
+        md["report()<br/>Markdown: métricas, diagnósticos,<br/>advertencias y fortalezas"]
         plots["plots_report()<br/>6 gráficos"]
         graficos["graficar() /<br/>guardar_graficos()"]
     end
@@ -51,7 +58,9 @@ flowchart LR
     validacion -- "sí, precios" --> fs
     validacion -- "sí, macro" --> ms
     validacion -- "no" --> error
-    fs --> juntar
+    fs --> sin_indices
+    sin_indices -- "sí: usar su ETF" --> error
+    sin_indices -- "no" --> juntar
     pesos --> validar_p
     juntar --> validar_p --> deriva --> stats
     stats --> resumen

@@ -8,7 +8,7 @@ import pytest  # noqa: E402
 from matplotlib.figure import Figure  # noqa: E402
 
 from market_toolkit.config import DIAS_COTIZACION_ANUAL  # noqa: E402
-from market_toolkit.models import Portfolio  # noqa: E402
+from market_toolkit.models import FinancialSeries, Portfolio, TipoActivo  # noqa: E402
 
 SECCIONES = [
     "# Informe de cartera",
@@ -109,3 +109,106 @@ def test_plots_report_guarda_los_png(cartera, tmp_path):
     cartera.plots_report(mostrar=False, carpeta=tmp_path)
     guardados = sorted(ruta.stem for ruta in tmp_path.glob("*.png"))
     assert guardados == sorted(GRAFICOS)
+
+
+# ---------- Métricas del informe, comparadas con un cálculo a mano ----------
+
+
+def test_report_rentabilidad_y_cagr(cartera):
+    rendimientos = cartera.rendimiento
+    valor_final = (1 + rendimientos).prod()
+    cagr = valor_final ** (DIAS_COTIZACION_ANUAL / len(cartera.precio_activos)) - 1
+    informe = cartera.report()
+    assert valor_metrica(informe, "Rentabilidad acumulada") == f"{valor_final - 1:.2%}"
+    assert valor_metrica(informe, "CAGR").startswith(f"{cagr:.2%}")
+    assert valor_metrica(informe, "Valor final de 100 iniciales") == f"{valor_final * 100:.2f}"
+    assert valor_metrica(informe, "Mejor día") == (
+        f"{rendimientos.idxmax().date()} ({rendimientos.max():.2%})"
+    )
+    assert valor_metrica(informe, "Peor día") == (
+        f"{rendimientos.idxmin().date()} ({rendimientos.min():.2%})"
+    )
+
+
+def test_report_sortino_y_expected_shortfall(cartera):
+    tasa = 0.04
+    exceso = cartera.rendimiento - tasa / DIAS_COTIZACION_ANUAL
+    desviacion_bajista = np.sqrt((exceso.clip(upper=0) ** 2).mean())
+    sortino = exceso.mean() / desviacion_bajista * np.sqrt(DIAS_COTIZACION_ANUAL)
+    cola = cartera.rendimiento[cartera.rendimiento <= cartera.rendimiento.quantile(0.05)]
+    informe = cartera.report(tasa_libre_riesgo=tasa)
+    assert valor_metrica(informe, "Sortino anualizado") == f"{sortino:.2f}"
+    assert valor_metrica(informe, "Expected Shortfall (95%, histórico diario)") == (
+        f"{-cola.mean():.2%}"
+    )
+
+
+def test_report_concentracion_hhi(cartera):
+    pesos = cartera.pesos_actuales / cartera.pesos_actuales.sum()
+    hhi = (pesos**2).sum()
+    informe = cartera.report()
+    assert valor_metrica(informe, "Índice HHI") == f"{hhi:.2f}"
+    assert valor_metrica(informe, "Número efectivo de activos") == f"{1 / hhi:.2f}"
+    assert valor_metrica(informe, "Mayor exposición absoluta") == f"{pesos.max():.2%}"
+
+
+def test_report_contribuciones_suman_la_rentabilidad_total(cartera):
+    informe = cartera.report()
+    total = float(valor_metrica(informe, "Rentabilidad acumulada").rstrip("%"))
+    contribuciones = []
+    for linea in informe.splitlines():
+        celdas = [celda.strip() for celda in linea.strip("|").split("|")]
+        if len(celdas) == 5 and celdas[0] in cartera.precio_activos.columns:
+            contribuciones.append(float(celdas[4].rstrip("%")))
+    assert len(contribuciones) == len(cartera.precio_activos.columns)
+    # Cada valor se muestra redondeado a dos decimales: la suma solo puede diferir por ese
+    # redondeo, como mucho media centésima por cada contribución
+    assert sum(contribuciones) == pytest.approx(total, abs=0.005 * len(contribuciones))
+
+
+def test_report_advierte_de_historial_corto(cartera):
+    informe = cartera.report(max_historial=10_000)
+    assert "Historial corto" in informe
+
+
+def test_report_advierte_de_correlacion_alta(activos_usd, fechas_laborables, serie_precios):
+    # Un activo que replica a otro: correlación de 1
+    replica = FinancialSeries(
+        (serie_precios * 2).rename("REPLICA"), TipoActivo.ACCION, moneda="USD"
+    )
+    pesos = pd.DataFrame(
+        {"AAA": [0.25], "BBB": [0.25], "CCC": [0.25], "REPLICA": [0.25]},
+        index=[fechas_laborables[0]],
+    )
+    informe = Portfolio([*activos_usd, replica], pesos).report()
+    assert "Correlación elevada entre **AAA** y **REPLICA**: 1.00." in informe
+
+
+def test_report_fortalezas(cartera):
+    informe = cartera.report(
+        max_drawdown=1,
+        min_activos_efectivos=1,
+        max_correlacion_diversificada=1,
+        min_sharpe=-100,
+    )
+    seccion = informe.split("## Fortalezas")[1]
+    assert "Diversificación por pesos" in seccion
+    assert "Correlación media reducida" in seccion
+    assert "Drawdown histórico moderado" in seccion
+    assert "Sharpe elevado" in seccion
+
+
+def test_report_sin_fortalezas(cartera):
+    informe = cartera.report(
+        max_drawdown=0,
+        min_activos_efectivos=100,
+        max_correlacion_diversificada=-1,
+        min_sharpe=100,
+    )
+    assert "No se han detectado fortalezas según los umbrales configurados." in informe
+
+
+def test_report_guarda_el_informe_en_un_fichero(cartera, tmp_path):
+    ruta = tmp_path / "informe.md"
+    informe = cartera.report(ruta=str(ruta))
+    assert ruta.read_text(encoding="utf-8") == informe
