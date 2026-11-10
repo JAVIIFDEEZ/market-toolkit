@@ -16,6 +16,7 @@ class TipoActivo(Enum):
     ACCION = "acción"
     INDICE = "índice"
     COMMODITY = "materia prima"
+    ETF = "ETF"
 
 
 @dataclass(frozen=True, eq=False)

@@ -172,9 +172,7 @@ class YahooFinanceProvider(Provider):
             except KeyError:
                 inexistentes.append(ticker)
             else:
-                if tipologia == "EQUITY":
-                    validos.append(ticker)
-                elif tipologia == "INDEX":
+                if tipologia == "EQUITY" or tipologia == "INDEX" or tipologia == "ETF":
                     validos.append(ticker)
                 else:
                     inexistentes.append(ticker)
@@ -182,8 +180,8 @@ class YahooFinanceProvider(Provider):
         if inexistentes:
             tickers_str = ", ".join(inexistentes)
             warnings.warn(
-                f"Los tickers {tickers_str} no son equities o no existen en Yahoo Finance."
-                f"Se eliminan de los datos de busqueda.",
+                f"Los tickers {tickers_str} no son equities, índices o ETFs, o no existen "
+                f"en Yahoo Finance. Se eliminan de los datos de busqueda.",
                 UserWarning,
                 stacklevel=2,
             )
@@ -216,10 +214,16 @@ class YahooFinanceProvider(Provider):
             info = yf_ticker.get_info()
             datos = datos["Close"].rename(ticker)  # Nos quedamos con los datos de cierre ajustados
             datos_limpios = limpiar_serie(datos)
+            if info["quoteType"] == "EQUITY":
+                tipo = TipoActivo.ACCION
+            elif info["quoteType"] == "INDEX":
+                tipo = TipoActivo.INDICE
+            else:
+                tipo = TipoActivo.ETF
             series.append(
                 FinancialSeries(
                     datos_limpios,
-                    TipoActivo.INDICE if info["quoteType"] == "INDEX" else TipoActivo.ACCION,
+                    tipo,
                     proveedor = "Yahoo Finance",
                     moneda = info.get("currency"),
                     bolsa = info.get("fullExchangeName"),
@@ -237,7 +241,8 @@ class YahooFinanceProvider(Provider):
                 elegido = next(candidato["symbol"]
                                for candidato in candidatos
                                if candidato["quoteType"] == "INDEX"
-                               or candidato["quoteType"] == "EQUITY")
+                               or candidato["quoteType"] == "EQUITY"
+                               or candidato["quoteType"] == "ETF")
             except StopIteration:
                 warnings.warn(
                     f'No se ha encontrado ningún activo con el nombre "{nombre}".',
@@ -694,11 +699,14 @@ class AlphaVantageProvider(Provider):
         tickers = super()._validar_input(tickers)
         invalidos = set(tickers) - self.COMMODITIES.keys()
         if invalidos:
-            raise ValueError(
-                f"Commodities no admitidos: {', '.join(invalidos)}. "
-                f"Usa: {', '.join(self.COMMODITIES)}."
-            )
-        return list(dict.fromkeys(self.COMMODITIES[ticker] for ticker in tickers))
+            warnings.warn(
+                f"Los tickers {', '.join(invalidos)} no son commodities admitidos."
+                f" Usa: {', '.join(self.COMMODITIES)}.",
+                UserWarning, stacklevel=2)
+
+        return list(
+            dict.fromkeys(self.COMMODITIES[ticker] for ticker in tickers if ticker not in invalidos)
+        )
 
     def download(
         self,
