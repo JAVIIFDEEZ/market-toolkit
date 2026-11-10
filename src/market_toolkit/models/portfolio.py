@@ -12,10 +12,11 @@ import numpy as np
 import pandas as pd
 from matplotlib.figure import Figure
 
+import market_toolkit.models as models
 import market_toolkit.models.informe as informe
 import market_toolkit.simulation.montecarlo as montecarlo
 from market_toolkit.config import DIAS_COTIZACION_ANUAL
-from market_toolkit.exceptions import InsufficientDataError
+from market_toolkit.exceptions import DataValidationError, InsufficientDataError
 from market_toolkit.preprocessing import juntar_series
 
 if TYPE_CHECKING:
@@ -53,6 +54,18 @@ class Portfolio:
         """
         # Juntar activos
         self._series = list(activos)
+        n_activos = len(activos)
+        activos = list(
+            filter(
+                lambda activo: activo.tipo_activo != models.TipoActivo.INDICE,
+                activos
+            )
+        )
+        if len(activos) != n_activos:
+            raise DataValidationError(
+                "Se han proporcionado índices como activos. "
+                "Considere en su lugar introducir los ETFs referenciados a dichos índices."
+            )
         self.precio_activos = juntar_series(activos, True, alineacion_temporal)
         # Validar pesos
         if not isinstance(pesos.index, pd.DatetimeIndex):
@@ -220,8 +233,7 @@ class Portfolio:
     def correlacion(self, t: float, guardar: bool = True) -> pd.DataFrame:
         """
         Calcula la correlación de los rendimientos diarios de los activos durante los últimos
-        `t` años de la cartera. Cada pareja de activos se calcula con sus propias fechas comunes,
-        en USD.
+        `t` años de la cartera, en USD y con las fechas de la cartera.
         :param t: Años hacia atrás desde la última fecha de la cartera (admite fracciones).
         :param guardar: `True` para guardar la matriz como imagen en
             `simulation/graficos/correlacion.png`.
@@ -252,7 +264,7 @@ class Portfolio:
         """Calcula correlaciones por parejas sin guardar archivos ni emitir advertencias.
         :param desde: Límite inferior exclusivo del periodo.
         :param hasta: Límite superior inclusivo del periodo.
-        :return: Matriz de correlaciones y sesiones comunes por pareja.
+        :return: Matriz de correlaciones.
         """
         nombres = list(self.precio_activos.columns)
         correlaciones = pd.DataFrame(np.eye(len(nombres)), index=nombres, columns=nombres)
@@ -339,7 +351,7 @@ class Portfolio:
         barra.outline.set_visible(False)
         eje.set_title(
             f"Correlación de rendimientos diarios\n{inicio.date()} a {fin.date()} · "
-            f"{n_sesiones} sesiones comunes por pareja",
+            f"cartera con {n_sesiones} sesiones en total",
             loc="left", color=montecarlo.COLORES["texto"], fontsize=12)
 
     def plots_report(self, mostrar: bool = True, carpeta: str | Path | None = None,

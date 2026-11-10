@@ -1,3 +1,5 @@
+from market_toolkit.providers.providers import YahooFinanceProvider
+
 # market-toolkit
 
 [![CI](https://github.com/JAVIIFDEEZ/market-toolkit/actions/workflows/ci.yml/badge.svg)](https://github.com/JAVIIFDEEZ/market-toolkit/actions/workflows/ci.yml)
@@ -6,7 +8,7 @@
 Toolkit en Python para **descargar, estandarizar y analizar datos bursátiles** y **gestionar y
 simular carteras de inversión**. Taller B1-T1 del máster MIAX.
 
-- **Descarga multifuente:** Yahoo Finance (acciones e índices), Polygon (acciones), Alpha Vantage
+- **Descarga multifuente:** Yahoo Finance (acciones, índices y ETFs), Polygon (acciones), Alpha Vantage
   (oro, plata y Brent) y FRED/ALFRED (series macroeconómicas). Todas las fuentes devuelven el
   mismo tipo de objeto.
 - **Series validadas con estadísticos automáticos:** `FinancialSeries` y `MacroSeries` comprueban
@@ -150,6 +152,9 @@ caída), la demo sigue con datos sintéticos. Todos los resultados se guardan en
 | `outputs/graficos/*.png` | Los seis gráficos de `plots_report()` |
 | `outputs/montecarlo/*.png` | Trayectorias y distribución del valor final de la simulación |
 
+Por defecto, la librería guarda los gráficos en `models/graficos/`. La demo los guarda en `outputs/`
+porque indica esa ruta con el parámetro `carpeta` de `plots_report()` y `guardar_graficos()`.
+
 ## Tests
 
 ```bash
@@ -208,6 +213,7 @@ validan que existen y `download()` devuelve una **lista de series** ya limpias y
 Las API keys se leen del fichero `.env` (si no están, se piden por pantalla):
 
 ```
+ALPHAVANTAGE_API_KEY=tu_clave
 POLYGON_API_KEY=tu_clave
 FRED_API_KEY=tu_clave
 ```
@@ -215,9 +221,11 @@ FRED_API_KEY=tu_clave
 <details>
 <summary><h3>Acciones / Stocks</h3></summary>
 
-Se descargan con `PolygonProvider` (Polygon.io, ahora Massive). El plan gratuito tiene dos
-limitaciones que el proveedor gestiona solo:
+Se pueden descargar con `YahooFinanceProvider` o `PolygonProvider` (Polygon.io, ahora Massive).
+En esta sección se explica el funcionamiento de `PolygonProvider`, en la siguiente 
+([Índices / Market Index y ETFs](#indices-market-index)) se comenta el de `YahooFinanceProvider`.
 
+El plan gratuito tiene dos limitaciones que el proveedor gestiona solo:
 - Solo cubre los **últimos 2 años**: si se pide una fecha anterior, se recorta y se avisa.
 - Solo permite **5 llamadas por minuto**: espera `pausa` segundos (12 por defecto) entre
   llamadas, así que cada ticker tarda unos 12 s.
@@ -350,10 +358,124 @@ df.tail(3)
 </details>
 
 <details>
-<summary><h3>Índices / Market Index</h3></summary>
+<summary><h3 id="indices-market-index">Índices / Market Index y ETFs</h3></summary>
 
-Pendiente de documentar. El plan gratuito de Polygon no incluye índices; se pueden descargar
-con `YahooFinanceProvider`, que admite acciones e índices (por ejemplo `^GSPC` o `^IBEX`).
+Se pueden descargar con `YahooFinanceProvider`, que admite acciones; índices, que deben empezar por
+el símpolo `^` (por ejemplo `^GSPC` o `^IBEX`); y ETFs. Los tickers que no se correspondan con
+activos almacenados en la base de datos de Yahoo Finance se descartan.
+
+#### Crear el proveedor
+
+```python
+from market_toolkit.providers.providers import YahooFinanceProvider
+
+yahoo = YahooFinanceProvider(["AAPL", "^GSPC", "SPY", "NOEXISTE"])
+print(yahoo)
+```
+
+```
+UserWarning: Los tickers NOEXISTE no son equities, índices o ETFs, o no existen en Yahoo Finance. Se eliminan de los datos de busqueda.
+YahooFinanceProvider object tickers<AAPL, SPY, ^GSPC>
+```
+
+Si no se conoce el ticker de los activos, también se puede buscar por nombre mediante el método `desde_nombres`.
+Si no se encuentra ningún activo con dicho nombre, se descarta.
+
+```python
+yahoo_nombres = YahooFinanceProvider.desde_nombres(["Apple", "S&P 500", "S&P 500 ETF", "SIN_NOMBRE"])
+print(yahoo_nombres)
+```
+
+```
+UserWarning: No se ha encontrado ningún activo con el nombre "SIN_NOMBRE".
+YahooFinanceProvider object tickers<AAPL, SPY, ^GSPC>
+```
+
+#### Descargar
+
+`download()` devuelve una lista de `FinancialSeries` con los cierres ajustados de cada ticker.
+
+```python
+series = yahoo.download()                                   # Histórico máximo de Yahoo Finance (por defecto)
+series = yahoo.download(periodo="6mo")                      # "1d", "5d", "3mo", "6mo", "1y", "2y", "5y", "10y" "max"
+series = yahoo.download(inicio="2025-01-01", fin="2025-06-30")
+series = yahoo.download(fin="2026-01-01", periodo="6mo")    # Del 2025-07-01 al 2026-01-01
+
+for s in yahoo.download():
+    print(s.activo, s.tipo, s.proveedor, s.inicio, s.fin, s.observaciones)
+```
+
+```
+AAPL acción Yahoo Finance 1980-12-12 2026-11-09 11570
+SPY ETF Yahoo Finance 1993-01-29 2026-11-09 8503
+^GSPC índice Yahoo Finance 1927-12-30 2026-11-09 24832
+```
+
+Si solo se indica `inicio` o `fin`, `periodo` calcula la otra fecha; con las dos fechas, se
+ignora.
+
+</details>
+
+<details>
+<summary><h3>Materias Primas: Oro, Plata y Barril de Brent</h3></summary>
+
+Se pueden descargar con `AlphaVantageProvider`. Únicamente admite las materias primas de Oro, Plata y Barril de petróleo de Brent.
+Los tickers que no se correspondan con ninguno de estos activos se descartan.
+
+El plan gratuito tiene dos limitaciones que el proveedor gestiona solo:
+- Solo se permite realizar 25 llamada al día. En caso de superarlas se lanza una excepción `ProviderError`.
+- Solo permite **1 llamada por segundo**: espera `pausa` segundos (1.1 por defecto) entre
+  llamadas.
+
+#### Crear el proveedor
+
+```python
+from market_toolkit.providers.providers import AlphaVantageProvider
+
+alpha = AlphaVantageProvider(["ORO", "BRENT", "TRIGO"])
+print(alpha)
+```
+
+```
+UserWarning: Los tickers TRIGO no son commodities admitidos. Usa: ORO, GOLD, XAU, PLATA, SILVER, XAG, PETRÓLEO, PETROLEO, BRENT.
+AlphaVantageProvider object tickers<BRENT, GOLD>
+```
+
+#### Listado de tickers admitidos
+
+| Ticker   | Identificador del proveedor | Descripción                            |
+|----------|-----------------------------|----------------------------------------|
+| ORO      | GOLD                        | Precio del oro                         |
+| GOLD     | GOLD                        | Precio del oro                         |
+| XAU      | SILVER                      | Precio del oro                         |
+| PLATA    | SILVER                      | Precio del oro                         |
+| SILVER   | SILVER                      | Precio de la plata                     |
+| XAG      | SILVER                      | Precio de la plata                     |
+| PETRÓLEO | BRENT                       | Precio del barril de petróleo de Brent |
+| PETROLEO | BRENT                       | Precio del barril de petróleo de Brent |
+| BRENT    | BRENT                       | Precio del barril de petróleo de Brent |
+
+#### Descargar
+
+`download()` devuelve una lista de `FinancialSeries` con los cierres ajustados de cada ticker.
+
+```python
+series = alpha.download()                                   # Histórico máximo de Alpha Vantage (por defecto)
+series = alpha.download(periodo="6mo")                      # "Xd", "Xmo", "Xy", "max"
+series = alpha.download(inicio="2025-01-01", fin="2025-06-30")
+series = alpha.download(fin="2026-01-01", periodo="6mo")    # Del 2025-07-01 al 2026-01-01
+
+for s in alpha.download():
+    print(s.activo, s.tipo, s.proveedor, s.inicio, s.fin, s.observaciones)
+```
+
+```
+BRENT materia prima Alpha Vantage 1987-05-20 2026-11-03 9122
+GOLD materia prima Alpha Vantage 2012-01-02 2026-11-08 5297
+```
+
+Si solo se indica `inicio` o `fin`, `periodo` calcula la otra fecha; con las dos fechas, se
+ignora.
 
 </details>
 
@@ -530,6 +652,10 @@ pesos = pd.DataFrame(
 cartera = Portfolio(series, pesos)
 ```
 
+Requisitos de los activos:
+
+- Deben ser un activo que se pueda comprar, esto es, una `FinancialSeries` de tipo ACCION, COMMODITY o ETF.
+
 Requisitos de los pesos:
 
 - Las columnas deben ser exactamente los activos de la cartera. Cada peso se empareja con su
@@ -635,16 +761,17 @@ cartera.correlacion(t=0.5)      # Últimos 6 meses
 
 ```
         AAPL  SAN.MC  VOD.L
-AAPL    1.00    0.17   0.08
-SAN.MC  0.17    1.00   0.11
-VOD.L   0.08    0.11   1.00
+AAPL    1.00    0.18   0.08
+SAN.MC  0.18    1.00   0.15
+VOD.L   0.08    0.15   1.00
 ```
 
 - Si `x` es mayor que el histórico de la cartera, avisa y usa el periodo disponible.
-- Cada pareja de activos usa **sus propias fechas comunes**, así que el hueco de un activo no
-  afecta a la correlación de los otros dos. El título de la imagen indica las sesiones usadas.
-- `correlacion.png` se conserva entre ejecuciones y simulaciones. Solo se borra al crear una
-  cartera con otros activos o pesos.
+- Se calcula con **las fechas de la cartera**, las mismas para todas las parejas. Con
+  `"eliminacion"` son las comunes a todos los activos, así que el hueco de un activo también
+  afecta a la correlación de los otros.
+- `correlacion.png` se conserva entre ejecuciones y simulaciones. Se borra al crear una cartera
+  con otros activos, pesos o fechas de precios.
 - Con `guardar=False` solo devuelve la matriz, sin escribir la imagen.
 
 ### Calendario
@@ -679,17 +806,17 @@ Con cualquiera de las dos opciones, la cartera empieza cuando existen todos sus 
   se usa el último conocido.
 - **Pocas fechas pueden importar mucho.** Un movimiento extremo junto a una fecha eliminada altera
   los resultados: en una prueba real con activos de EE.UU. y Europa, seis sesiones eliminadas en
-  un año llevaron la correlación AAPL-MSFT de 0,155 a 0,008. Por eso `correlacion()` usa las
-  fechas comunes de cada pareja; los estadísticos de la cartera y la simulación usan las fechas
-  comunes a todos los activos, así que sus correlaciones pueden ser distintas de las de
-  `correlacion()`.
+  un año llevaron la correlación AAPL-MSFT de 0,155 a 0,008. Los estadísticos de la cartera, la
+  simulación y `correlacion()` usan las mismas fechas de la cartera, así que todos están expuestos
+  a este efecto.
 
 ### Monedas
 
 Todos los precios de la cartera se pasan a **USD** con el tipo de cambio diario de Yahoo Finance
 (`EURUSD=X`, `GBPUSD=X`...), de modo que las rentabilidades incluyen la variación de la divisa. Cada
 activo debe tener su moneda informada. Si un día falta el tipo de cambio se usa el último conocido.
-Si una divisa no tiene ningún dato con el que convertir, se lanza un `ValueError` que la indica.
+Las fechas sin ningún tipo de cambio anterior se descartan sin avisar y, si una divisa no tiene
+ningún dato, la cartera no se puede crear.
 
 Las cotizaciones en centésimas se ajustan automáticamente: `GBp` y `GBX` (peniques), `ZAc`
 (céntimos de rand) e `ILA` (agorot). En el ejemplo, `VOD.L` cotiza en peniques y aparece en USD:
@@ -766,6 +893,9 @@ cartera.plots_report(carpeta="resultados/cartera")   # Guarda en otra carpeta
 | `carpeta` | Carpeta de destino de los PNG | `simulation/graficos/informe/` |
 | `guardar` | Guarda los gráficos como PNG | `True` |
 
+La ruta `models/graficos/informe/` solo se usa si no se indica `carpeta`. Por ejemplo, la
+[demo](#demo) pasa `carpeta="outputs/graficos"` y deja ahí los PNG.
+
 Cada ejecución sustituye los PNG del informe anterior, sin afectar a `correlacion.png` ni a los
 gráficos de la simulación. En las fórmulas, `r(i,t)` es el rendimiento diario del activo `i`,
 `w(i,t)` su peso al empezar la sesión `t`, `r(t) = Σ w(i,t) × r(i,t)` el rendimiento de la cartera
@@ -811,7 +941,7 @@ activo puede subir mucho y aportar poco si pesaba poco.
 **`correlacion`: matriz de correlaciones.** Indica cuánto se mueven juntos los activos, de -1
 (sentido opuesto) a 1 (a la vez). Cuanto más bajas, mayor es la diversificación. Es el mismo
 cálculo que `correlacion()`, con la correlación de Pearson de los rendimientos diarios en USD y las
-fechas comunes de cada pareja, pero sobre todo el periodo de la cartera.
+fechas de la cartera, pero sobre todo su periodo.
 
 Cada activo mantiene su color entre ejecuciones. Con más de 8 activos, los de menor peso medio se
 agrupan en "Otros" en `evolucion` y `pesos`.
@@ -958,6 +1088,10 @@ Al crear el objeto se sustituyen los dos gráficos de la simulación anterior en
   la mediana.
 - `distribucion.png`: histograma del valor final (pérdidas en naranja y ganancias en verde) con
   el valor inicial, la media, la mediana, el VaR 95 % y el VaR 99 %.
+
+La ruta `models/graficos/` es la de por defecto. Para guardarlos en otra carpeta, se crea el objeto
+con `guardar_graficos=False` y se llama a `mc.guardar_graficos(carpeta="...")`. Así lo hace la
+[demo](#demo), que los deja en `outputs/montecarlo/`.
 
 ### Limitaciones
 
