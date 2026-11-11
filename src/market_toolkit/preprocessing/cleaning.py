@@ -130,7 +130,11 @@ def juntar_series(
     # Pasar moneda a USD
     monedas_activos = pd.Series({
         # Si es MacroSerie, simulamos moneda USD que mantiene la serie temporal invariante
-        serie.serie_temporal.name: getattr(serie, "moneda", "USD")
+        serie.serie_temporal.name: getattr(
+            serie,
+            "moneda",
+            "EUR" if serie.activo in {"IRLTLT01ESM156N", "IRLTLT01DEM156N"} else "USD"
+        )
         for serie in series
     })
     # Cada moneda se cambia desde su moneda principal, ajustando la escala de las subunidades
