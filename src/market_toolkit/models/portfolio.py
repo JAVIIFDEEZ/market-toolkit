@@ -40,6 +40,7 @@ class Portfolio:
     desviacion_tipica: float
     rentabilidad_anualizada: float
     volatilidad_anualizada: float
+    _hay_macro: bool
 
     def __init__(self, activos: Sequence[SerieTemporal], pesos: pd.DataFrame, *,
                  alineacion_temporal: Literal["relleno", "eliminacion"] = "eliminacion"):
@@ -59,6 +60,10 @@ class Portfolio:
         n_activos = len(activos)
         activos_macro = [activo for activo in activos if isinstance(activo, MacroSeries)
                                and activo.activo in self.MACRO_ADMITIDOS]
+        if len(activos_macro) > 0:
+            self._hay_macro = True
+        else:
+            self._hay_macro = False
         activos_financiero = [activo for activo in activos if isinstance(activo, FinancialSeries)
                                and activo.tipo_activo != models.TipoActivo.INDICE]
         activos = activos_macro + activos_financiero
@@ -155,16 +160,29 @@ class Portfolio:
         rentabilidades = self.precio_activos.pct_change().dropna()
         medias = rentabilidades.mean()
         desviaciones = rentabilidades.std()
-        rentabilidades_anual = (1 + medias) ** DIAS_COTIZACION_ANUAL - 1
-        volatilidades_anual = desviaciones * np.sqrt(DIAS_COTIZACION_ANUAL)
         info.loc["moneda"] = "USD"
         info.loc["inicio"] = self.precio_activos.index[0].date()
         info.loc["fin"] = self.precio_activos.index[-1].date()
         info.loc["observaciones"] = len(self.precio_activos)
-        info.loc["media_diaria"] = medias
-        info.loc["desviacion_tipica_diaria"] = desviaciones
-        info.loc["rentabilidad_anualizada"] = rentabilidades_anual
-        info.loc["volatilidad_anualizada"] = volatilidades_anual
+        if self._hay_macro:
+            info.loc["media"] = medias
+            info.loc["desviacion_tipica"] = desviaciones
+            info = info.drop(
+                index=[
+                    "media_diaria",
+                    "desviacion_tipica_diaria",
+                    "rentabilidad_anualizada",
+                    "volatilidad_anualizada"
+                ],
+                errors="ignore"
+            )
+        else:
+            rentabilidades_anual = (1 + medias) ** DIAS_COTIZACION_ANUAL - 1
+            volatilidades_anual = desviaciones * np.sqrt(DIAS_COTIZACION_ANUAL)
+            info.loc["media_diaria"] = medias
+            info.loc["desviacion_tipica_diaria"] = desviaciones
+            info.loc["rentabilidad_anualizada"] = rentabilidades_anual
+            info.loc["volatilidad_anualizada"] = volatilidades_anual
         return info
 
     def _calcular_pesos_activos(
