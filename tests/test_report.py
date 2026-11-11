@@ -167,7 +167,7 @@ def test_report_contribuciones_suman_la_rentabilidad_total(cartera):
 
 
 def test_report_advierte_de_historial_corto(cartera):
-    informe = cartera.report(max_historial=10_000)
+    informe = cartera.report(min_historial=10_000)
     assert "Historial corto" in informe
 
 
