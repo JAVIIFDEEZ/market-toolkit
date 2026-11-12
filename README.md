@@ -1,5 +1,3 @@
-from market_toolkit.providers.providers import YahooFinanceProvider
-
 # market-toolkit
 
 [![CI](https://github.com/JAVIIFDEEZ/market-toolkit/actions/workflows/ci.yml/badge.svg)](https://github.com/JAVIIFDEEZ/market-toolkit/actions/workflows/ci.yml)
@@ -15,9 +13,10 @@ simular carteras de inversión**. Taller B1-T1 del máster MIAX.
   los datos y calculan media, desviación típica, rentabilidad y volatilidad al crearse.
 - **Limpieza y alineación temporal** entre activos con calendarios distintos, con conversión a USD.
 - **Carteras** con pesos que pueden cambiar en el tiempo y que derivan entre rebalanceos.
-- **Simulación de Monte Carlo** de un activo o de una cartera, con las correlaciones entre activos.
-- **Informes:** `report()` en Markdown con métricas y advertencias de riesgo, y `plots_report()`
-  con seis gráficos.
+- **Simulación de Monte Carlo** de un activo o de una cartera, con las correlaciones entre activos
+  y tres distribuciones: normal, t de Student (colas gruesas) y bootstrap histórico.
+- **Informes:** `report()` en Markdown o en HTML con métricas, advertencias de riesgo y comparación
+  con un índice de referencia (beta, alfa, tracking error), y `plots_report()` con seis gráficos.
 
 ## Índice
 
@@ -26,6 +25,7 @@ simular carteras de inversión**. Taller B1-T1 del máster MIAX.
 - [Configuración de las claves](#configuración-de-las-claves)
 - [Uso rápido](#uso-rápido)
 - [Demo](#demo)
+- [Interfaz web](#interfaz-web)
 - [Tests](#tests)
 - [Arquitectura](#arquitectura)
 - [Estructura del proyecto](#estructura-del-proyecto)
@@ -134,7 +134,8 @@ los parámetros de la simulación.
 
 `examples/demo.py` recorre el toolkit de principio a fin: descarga acciones y un índice (y oro y
 el tipo libre de riesgo si hay claves de Alpha Vantage y FRED), crea una cartera, la simula y
-genera los informes. Funciona sin ninguna clave: las claves solo añaden datos extra.
+genera los informes. Compara el riesgo de cola de las tres distribuciones de Monte Carlo. Funciona
+sin ninguna clave: las claves solo añaden datos extra.
 
 ```bash
 python examples/demo.py                 # datos reales
@@ -150,11 +151,48 @@ caída), la demo sigue con datos sintéticos. Todos los resultados se guardan en
 | Fichero | Contenido |
 | --- | --- |
 | `outputs/informe.md` | Informe en Markdown de la cartera |
+| `outputs/informe.html` | El mismo informe en HTML, con los gráficos incrustados (se abre en el navegador) |
 | `outputs/graficos/*.png` | Los seis gráficos de `plots_report()` |
 | `outputs/montecarlo/*.png` | Trayectorias y distribución del valor final de la simulación |
 
-Por defecto, la librería guarda los gráficos en `models/graficos/`. La demo los guarda en `outputs/`
+Por defecto, la librería guarda los gráficos en `simulation/graficos/`. La demo los guarda en `outputs/`
 porque indica esa ruta con el parámetro `carpeta` de `plots_report()` y `guardar_graficos()`.
+
+## Interfaz web
+
+Una página local para usar todo el toolkit desde el navegador, sin escribir código. No necesita
+instalar nada más: usa solo la biblioteca estándar de Python, funciona sin conexión con datos
+sintéticos y escucha únicamente en tu máquina (`localhost`).
+
+```bash
+python -m market_toolkit.web                # abre http://localhost:8000
+python -m market_toolkit.web --sin-red      # marca por defecto los datos sintéticos
+python -m market_toolkit.web --puerto 8080  # otro puerto
+python -m market_toolkit.web --no-abrir     # no abre el navegador al arrancar
+```
+
+La página tiene seis pestañas. Cada una se desbloquea al completar la anterior:
+
+| Pestaña | Qué se puede hacer |
+| --- | --- |
+| 1. Activos | Buscar activos por nombre o ticker (en un catálogo de unos 40 activos agrupados y en Yahoo Finance) o elegirlos del catálogo: acciones de EE. UU., del IBEX 35 y europeas, ETF y materias primas. Elegir el índice de referencia y el periodo (con atajos de 1 a 20 años). Usar datos reales o sintéticos. Se ven los estadísticos de cada serie (tabla ordenable), su evolución en base 100 en un gráfico interactivo, y se pueden descargar los precios en CSV |
+| 2. Cartera | Fijar los pesos con deslizadores, a partes iguales o por la inversa de la volatilidad. Elegir rebalanceo (nunca, mensual, trimestral o anual) y cómo tratar las fechas sin cotización. Se ven la rentabilidad, la volatilidad, el Sharpe y la máxima caída, la evolución frente al índice, el drawdown y la deriva de los pesos |
+| 3. Correlación y gráficos | Mapa de correlaciones con distintas ventanas (de 6 meses a 10 años) y los seis gráficos de `plots_report()`, que se amplían al pulsarlos |
+| 4. Monte Carlo | Simular la cartera o cualquier activo, con la distribución normal, la t de Student o el bootstrap. Se pueden indicar supuestos generales o por activo y escenarios rápidos (estrés y calma). Se ven el VaR y el CVaR al 95 % y al 99 %, el abanico de percentiles, el histograma del valor final y la comparación de las tres distribuciones |
+| 5. Informe | Generar el informe en HTML o Markdown, con índice de referencia, Monte Carlo y gráficos opcionales, y umbrales de las advertencias a medida. Se puede ver, abrir en otra pestaña o descargar |
+| 6. Macro (FRED) | Descargar y comparar series macroeconómicas: tipos, inflación, paro, VIX... Necesita `FRED_API_KEY` |
+
+Las materias primas (oro, plata y Brent) se descargan de Alpha Vantage, y el tipo libre de riesgo
+de FRED, si hay claves en el `.env`. Los errores y avisos (pesos que no suman 100 %, tickers que
+no existen, sin conexión...) se muestran en la propia página. Hay tema claro y oscuro, y se
+adapta al móvil.
+
+El código está en `src/market_toolkit/web/`:
+
+- `aplicacion.py`: la lógica, con un método por acción que se puede probar sin navegador.
+- `catalogo.py`: los activos sugeridos.
+- `servidor.py`: el servidor HTTP.
+- `pagina.py`: la página.
 
 ## Tests
 
@@ -191,6 +229,8 @@ Las decisiones de diseño se justifican en los ADR (*Architecture Decision Recor
 | [0001](docs/adr/0001-fuentes-de-datos.md) | Fuentes de datos, cómo se estandarizan y sus limitaciones |
 | [0002](docs/adr/0002-validacion-de-inputs.md) | Validación estricta de las series en lugar de admitir cualquier input |
 | [0003](docs/adr/0003-portfolio-como-clase.md) | `Portfolio` como clase normal y no como dataclass |
+| [0004](docs/adr/0004-distribuciones-montecarlo.md) | Monte Carlo con distribuciones normal, t de Student y bootstrap |
+| [0005](docs/adr/0005-interfaz-web-biblioteca-estandar.md) | Interfaz web con la biblioteca estándar y no con un framework |
 
 ## Estructura del proyecto
 
@@ -199,10 +239,14 @@ market-toolkit/
 ├── src/market_toolkit/
 │   ├── config.py              # constantes y claves (.env)
 │   ├── exceptions.py          # jerarquía de excepciones propias
+│   ├── datos_demo.py          # datos reales y sintéticos de la demo y la web
 │   ├── providers/             # ingesta: Yahoo, Polygon, Alpha Vantage y FRED
 │   ├── preprocessing/         # limpieza, alineación temporal y validación
 │   ├── models/                # series, cartera y gráficos del informe
-│   └── simulation/            # simulación de Monte Carlo
+│   ├── analytics/             # funciones puras: rendimientos, benchmark y colas de la t
+│   ├── simulation/            # simulación de Monte Carlo
+│   ├── reporting/             # informe en HTML
+│   └── web/                   # interfaz web local (servidor y página)
 ├── tests/                     # tests con datos sintéticos (pytest)
 ├── examples/demo.py           # demo de extremo a extremo
 ├── docs/
@@ -884,6 +928,35 @@ Los umbrales de las advertencias se pueden cambiar:
 (`0.95` por defecto) es el nivel del Expected Shortfall. `min_activos_efectivos`,
 `max_correlacion_diversificada` y `min_sharpe` son los umbrales de las fortalezas.
 
+Dos secciones opcionales completan el informe:
+
+```python
+sp500 = YahooFinanceProvider(["^GSPC"]).download(inicio="2022-01-01")[0]
+cartera.report(benchmark=sp500)            # Comparación con un índice de referencia
+cartera.report(incluir_montecarlo=True)    # Riesgo a un año con tres distribuciones
+```
+
+| Sección | Contenido |
+| --- | --- |
+| Comparación con el índice de referencia | Rentabilidad de la cartera y del índice, **beta**, **alfa de Jensen**, **tracking error**, **information ratio** y correlación. Avisa si la cartera rinde menos que el índice |
+| Simulación de Monte Carlo (1 año) | VaR, CVaR, probabilidad de pérdida y valor final mediano con las distribuciones normal, t de Student y bootstrap histórico |
+
+El índice no forma parte de la cartera (los índices no se pueden comprar): solo sirve de referencia.
+
+### Informe en HTML
+
+Con `formato="html"`, `report()` devuelve el mismo informe como una página HTML autocontenida: las
+tablas con formato, las advertencias resaltadas y los seis gráficos de `plots_report()` incrustados
+como imágenes. Es un único fichero que se abre en cualquier navegador y se puede enviar tal cual.
+
+```python
+cartera.report(formato="html", benchmark=sp500, ruta="informe.html")
+cartera.report(formato="html", incluir_graficos=False)   # Solo texto y tablas
+```
+
+El informe se genera siempre en Markdown (lo que pide el enunciado) y `reporting/html.py` lo
+traduce a HTML, sin librerías adicionales.
+
 ### Informe gráfico
 
 `plots_report()` genera seis gráficos de la cartera sobre todo su periodo, en USD. Los muestra por
@@ -903,7 +976,7 @@ cartera.plots_report(carpeta="resultados/cartera")   # Guarda en otra carpeta
 | `carpeta` | Carpeta de destino de los PNG | `simulation/graficos/informe/` |
 | `guardar` | Guarda los gráficos como PNG | `True` |
 
-La ruta `models/graficos/informe/` solo se usa si no se indica `carpeta`. Por ejemplo, la
+La ruta `simulation/graficos/informe/` solo se usa si no se indica `carpeta`. Por ejemplo, la
 [demo](#demo) pasa `carpeta="outputs/graficos"` y deja ahí los PNG.
 
 Cada ejecución sustituye los PNG del informe anterior, sin afectar a `correlacion.png` ni a los
@@ -1042,6 +1115,8 @@ sesión). El resultado está en USD. Por defecto **no hay rebalanceo**:
 | `rebalanceo` | Solo carteras: `False` compra y mantiene y `True` restablece los pesos cada día | `False` |
 | `semilla` | Fija el azar para obtener siempre el mismo resultado | `None` |
 | `guardar_graficos` | Guarda los gráficos de la simulación | `True` |
+| `distribucion` | Forma de los choques diarios: `"normal"`, `"t"` (t de Student) o `"bootstrap"` (días reales del histórico) | `"normal"` |
+| `grados_libertad` | Solo con `"t"`: grados de libertad (mayor que 2; cuanto más bajo, colas más gruesas) | Estimados de la curtosis |
 
 Ejemplo con todos los parámetros retocados:
 
@@ -1099,14 +1174,35 @@ Al crear el objeto se sustituyen los dos gráficos de la simulación anterior en
 - `distribucion.png`: histograma del valor final (pérdidas en naranja y ganancias en verde) con
   el valor inicial, la media, la mediana, el VaR 95 % y el VaR 99 %.
 
-La ruta `models/graficos/` es la de por defecto. Para guardarlos en otra carpeta, se crea el objeto
+La ruta `simulation/graficos/` es la de por defecto. Para guardarlos en otra carpeta, se crea el objeto
 con `guardar_graficos=False` y se llama a `mc.guardar_graficos(carpeta="...")`. Así lo hace la
 [demo](#demo), que los deja en `outputs/montecarlo/`.
 
+### Distribuciones
+
+Con la distribución **normal** las caídas extremas son menos probables que en los mercados reales,
+así que el VaR y el CVaR pueden quedarse cortos. Hay dos alternativas:
+
+| Distribución | Cómo funciona |
+| --- | --- |
+| `"t"` | **t de Student multivariante**: mismas volatilidades y correlaciones, pero colas más gruesas. Los grados de libertad se estiman de la curtosis histórica (ν = 6 / curtosis + 4) o se fijan con `grados_libertad` |
+| `"bootstrap"` | **Bootstrap histórico**: cada día simulado es un día real del pasado elegido al azar (todos los activos a la vez, para conservar sus correlaciones), reescalado a la volatilidad supuesta. No supone ninguna distribución |
+
+```python
+MonteCarlo(cartera, distribucion="t")                      # ν estimado de los datos
+MonteCarlo(cartera, distribucion="t", grados_libertad=4)   # Colas más gruesas
+MonteCarlo(cartera, distribucion="bootstrap")
+MonteCarlo.comparar_distribuciones(cartera)  # VaR y CVaR de las tres, en una tabla
+```
+
+Las diferencias se notan sobre todo a horizontes cortos y en los percentiles extremos (VaR y CVaR
+al 99 %). A horizontes largos se reducen, porque la suma de muchos días se parece cada vez más a
+una normal.
+
 ### Limitaciones
 
-- Supone rendimientos **normales**: los movimientos extremos (crisis) son más frecuentes en la
-  realidad, así que el VaR y el CVaR pueden quedarse cortos.
+- Con la distribución normal, los movimientos extremos (crisis) son más frecuentes en la realidad
+  que en la simulación. La t de Student y el bootstrap lo corrigen en parte.
 - La rentabilidad, la volatilidad y las correlaciones se mantienen **constantes** durante todo el
   horizonte.
 - Con supuestos históricos, se asume que el futuro se comportará como el pasado del periodo

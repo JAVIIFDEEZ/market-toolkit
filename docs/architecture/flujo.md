@@ -16,6 +16,8 @@ Código fuente: [`diagramas/flujo.mmd`](diagramas/flujo.mmd)
    que los replique), junta las series, alinea los calendarios, pasa los precios a USD, valida
    los pesos y calcula cómo derivan entre rebalanceos.
 4. **Simulación.** `MonteCarlo` simula un activo o la cartera con un movimiento browniano
-   geométrico, con las correlaciones históricas entre activos (descomposición de Cholesky).
-5. **Resultados.** Resumen, informe en Markdown (métricas, diagnósticos, advertencias de riesgo y
+   geométrico, con las correlaciones históricas entre activos y choques normales, de una t de
+   Student o del bootstrap histórico.
+5. **Resultados.** Resumen, informe en Markdown o HTML (métricas, comparación con un índice de
+   referencia, riesgo de cola según la distribución, diagnósticos, advertencias de riesgo y
    fortalezas), seis gráficos de la cartera y los gráficos de la simulación.

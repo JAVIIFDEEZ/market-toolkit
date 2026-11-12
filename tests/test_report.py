@@ -212,3 +212,89 @@ def test_report_guarda_el_informe_en_un_fichero(cartera, tmp_path):
     ruta = tmp_path / "informe.md"
     informe = cartera.report(ruta=str(ruta))
     assert ruta.read_text(encoding="utf-8") == informe
+
+
+# ---------- Índice de referencia, Monte Carlo y HTML ----------
+
+
+@pytest.fixture
+def indice(precios_sinteticos):
+    """Índice de referencia: la media de los tres activos de la cartera."""
+    precios = precios_sinteticos.mean(axis=1).rename("IDX")
+    return FinancialSeries(precios, TipoActivo.INDICE, moneda="USD", metadatos={"nombre": "Índice"})
+
+
+def test_report_con_benchmark(cartera, indice):
+    from market_toolkit.analytics import metricas_benchmark
+
+    metricas = metricas_benchmark(cartera.rendimiento, indice.rendimientos(), 0.04)
+    informe = cartera.report(tasa_libre_riesgo=0.04, benchmark=indice)
+    assert "## Comparación con el índice de referencia (IDX)" in informe
+    assert valor_metrica(informe, "Beta") == f"{metricas['beta']:.2f}"
+    assert valor_metrica(informe, "Alfa de Jensen anual") == f"{metricas['alfa']:.2%}"
+    assert valor_metrica(informe, "Tracking error anual") == f"{metricas['tracking_error']:.2%}"
+
+
+def test_report_advierte_si_la_cartera_rinde_menos_que_el_indice(cartera, precios_sinteticos):
+    # Un índice que sube un 0,2 % cada día: la cartera siempre rinde menos
+    fechas = precios_sinteticos.index
+    precios = pd.Series(100 * 1.002 ** np.arange(len(fechas)), index=fechas, name="SUBE")
+    indice = FinancialSeries(precios, TipoActivo.INDICE, moneda="USD")
+    assert "La cartera ha rendido" in cartera.report(benchmark=indice)
+
+
+def test_report_rechaza_un_benchmark_que_no_es_una_serie(cartera, serie_precios):
+    with pytest.raises(ValueError, match="benchmark"):
+        cartera.report(benchmark=serie_precios)
+
+
+def test_report_con_montecarlo(cartera):
+    informe = cartera.report(incluir_montecarlo=True, simulaciones_montecarlo=300)
+    seccion = informe.split("## Simulación de Monte Carlo (1 año)")[1].split("##")[0]
+    filas = [linea for linea in seccion.splitlines() if linea.startswith("| ")]
+    assert len(filas) == 5  # Cabecera, separador y una fila por distribución
+    assert "| Normal |" in seccion
+    assert "| Bootstrap histórico |" in seccion
+
+
+def test_report_en_html(cartera, indice):
+    pagina = cartera.report(benchmark=indice, formato="html")
+    assert pagina.startswith("<!DOCTYPE html>")
+    assert "<h1>Informe de cartera</h1>" in pagina
+    assert pagina.count("<table>") == 2  # Composición y correlaciones
+    assert pagina.count('src="data:image/png;base64,') == 6  # Los seis gráficos incrustados
+    assert "Comparación con el índice de referencia" in pagina
+
+
+def test_report_en_html_sin_graficos(cartera):
+    pagina = cartera.report(formato="html", incluir_graficos=False)
+    assert "<img" not in pagina
+    assert "<h2>Riesgo</h2>" in pagina
+
+
+def test_report_html_guarda_el_fichero(cartera, tmp_path):
+    ruta = tmp_path / "informe.html"
+    pagina = cartera.report(formato="html", incluir_graficos=False, ruta=str(ruta))
+    assert ruta.read_text(encoding="utf-8") == pagina
+
+
+def test_report_rechaza_formatos_no_validos(cartera):
+    with pytest.raises(ValueError, match="Formato"):
+        cartera.report(formato="pdf")
+
+
+def test_plots_report_con_benchmark(cartera, indice):
+    figuras = cartera.plots_report(mostrar=False, guardar=False, benchmark=indice)
+    leyenda = [texto.get_text() for texto in figuras["evolucion"].axes[0].get_legend().get_texts()]
+    assert "Referencia: Índice" in leyenda
+
+
+def test_report_con_un_rebalanceo_en_un_dia_sin_sesion(activos_usd, fechas_laborables):
+    # 2024-06-01 es sábado: los pesos nuevos se aplican el lunes 3 y el informe debe mostrarlos
+    pesos = pd.DataFrame(
+        {"AAA": [0.5, 0.2], "BBB": [0.3, 0.4], "CCC": [0.2, 0.4]},
+        index=[fechas_laborables[0], pd.Timestamp("2024-06-01")],
+    )
+    informe = Portfolio(activos_usd, pesos).report()
+    assert "**Último rebalanceo explícito:** 2024-06-01" in informe
+    assert "  - AAA: 20.00%" in informe

@@ -37,4 +37,8 @@ Código fuente: [`diagramas/clases.mmd`](diagramas/clases.mmd)
 - **Cada clase en su paquete.** Los recuadros agrupan las clases por paquete (`providers`,
   `models`, `simulation` y `exceptions`), igual que en el código.
 
+- **Los cálculos reutilizables, fuera de las clases.** `analytics` (benchmark y colas de la t) y
+  `reporting` (HTML) son módulos de funciones puras: `Portfolio` y `MonteCarlo` los usan, pero no
+  al revés.
+
 `Fundamentales` está definida pero todavía no la usa ningún proveedor.

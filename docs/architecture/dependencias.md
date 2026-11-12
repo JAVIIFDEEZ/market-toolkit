@@ -22,8 +22,11 @@ Las flechas en rojo son los acoplamientos que quedan por resolver:
 
 ## Arquitectura objetivo
 
-Cómo quedaría el paquete al rellenar los módulos que hoy están vacíos (`extractor.py`,
-`analytics/` y `reporting/`). En naranja, lo pendiente. `MonteCarlo` ya está en `simulation/`.
+Cómo quedaría el paquete al completar los módulos pendientes. En naranja, lo que falta.
+`MonteCarlo` ya está en `simulation/`; `analytics/` ya tiene las métricas frente al índice de
+referencia y la estimación de colas de la t de Student, y `reporting/` ya genera el
+informe en HTML. Faltan `extractor.py`, el registro de proveedores y llevar a `analytics/` y
+`reporting/` los cálculos y gráficos que aún están en `Portfolio`.
 
 ![Arquitectura objetivo](diagramas/dependencias_objetivo.svg)
 
