@@ -40,7 +40,7 @@ ellos. Es el caso de las series: reciben una `pd.Series` y unos metadatos, y lo 
 
 - `Portfolio` mantiene el papel que pide el enunciado: agrega varios activos con sus
   ponderaciones (4.3) e integra Monte Carlo como método directo, `simulacion_monte_carlo()` (4.4).
-- Los datos que entran en la cartera sí son dataclasses validadas (`FinancialSeries`), así que la
+- Los datos que entran en la cartera sí son dataclasses validadas (`FinancialSeries` y `MacroSeries`), así que la
   cartera trabaja siempre sobre datos estandarizados.
 - Si en el futuro la cartera solo guardara datos y delegara los cálculos en otros módulos
   (`analytics/`, `reporting/`), convertirla en dataclass sería sencillo y habría que revisar esta

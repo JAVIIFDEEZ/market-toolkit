@@ -1,14 +1,13 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from typing import TYPE_CHECKING, Literal
+from typing import Literal
 
 import numpy as np
 import pandas as pd
 import yfinance
 
-if TYPE_CHECKING:
-    from market_toolkit.models import FinancialSeries
+import market_toolkit.models.series as series
 
 # Monedas que Yahoo Finance da en centésimas: {subunidad: (moneda principal, valor en esa moneda)}
 SUBUNIDADES_MONEDA = {
@@ -71,8 +70,25 @@ def limpiar_dataframe(
         # Si la diferencia es al inicio se toma como primer dia el del ultimo activo disponible
         df = df.dropna(axis=0, how="any")
     elif alineacion_temporal == "eliminacion":
+        # Se rellenan SOLO los activos con datos mensuales o más distanciados
+        siguiente_dato = pd.DataFrame(
+            {
+                col: df.index.to_series().where(df[col].notna()).bfill()
+                for col in df.columns
+            },
+            index=df.index
+        )
+        distancia = siguiente_dato.sub(df.index, axis=0)
+        mascara = distancia <= pd.Timedelta(days=27)
+        columnas = mascara.columns[distancia.median() > pd.Timedelta(days=10)]
+        df.loc[:, columnas] = df[columnas].ffill(limit=7)
         # Eliminar las filas (días) a las que le faltan algun dato
         df = df.dropna(axis=0, how="any")
+        # Determinar si al alguna serie mensual
+        if len(columnas) >= 1:
+            # Nos quedamos con la primera fecha del mes en la que todos los activos tienen datos
+            df = df.groupby(df.index.to_period("M")).first()
+            df.index = df.index.to_timestamp()
     return df
 
 def limpiar_serie(serie: pd.Series, permitir_negativos: bool = False) -> pd.Series:
@@ -93,7 +109,7 @@ def limpiar_serie(serie: pd.Series, permitir_negativos: bool = False) -> pd.Seri
     return serie
 
 def juntar_series(
-        series: Sequence[FinancialSeries],
+        series: Sequence[series.SerieTemporal],
         permitir_negativos: bool = False,
         alineacion_temporal: Literal["relleno", "eliminacion"] | None = None
 ) -> pd.DataFrame:
@@ -110,9 +126,15 @@ def juntar_series(
     """
     df_series = pd.concat([serie.serie_temporal for serie in series], axis=1)
     df_series = limpiar_dataframe(df_series, permitir_negativos, alineacion_temporal)
+
     # Pasar moneda a USD
     monedas_activos = pd.Series({
-        serie.serie_temporal.name: serie.moneda
+        # Si es MacroSerie, simulamos moneda USD que mantiene la serie temporal invariante
+        serie.serie_temporal.name: getattr(
+            serie,
+            "moneda",
+            "EUR" if serie.activo in {"IRLTLT01ESM156N", "IRLTLT01DEM156N"} else "USD"
+        )
         for serie in series
     })
     # Cada moneda se cambia desde su moneda principal, ajustando la escala de las subunidades

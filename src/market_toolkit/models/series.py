@@ -50,6 +50,10 @@ class SerieTemporal:
         return self.metadatos.get("nombre", str(self.serie_temporal.name))
 
     @property
+    def activo(self) -> str:
+        return str(self.serie_temporal.name)
+
+    @property
     def inicio(self) -> date:
         return self.serie_temporal.index.min().date()
 
@@ -64,6 +68,12 @@ class SerieTemporal:
     @property
     def observaciones(self) -> int:
         return len(self.serie_temporal)
+
+    def resumen(self) -> dict:
+        """
+        Devuelve información relevante sobre la serie.
+        :return: Diccionario con dicha información.
+        """
 
 
 @dataclass(frozen=True, eq=False)
@@ -103,10 +113,6 @@ class FinancialSeries(SerieTemporal):
         object.__setattr__(self, "desviacion_tipica", desviacion)
         object.__setattr__(self, "rentabilidad_anualizada", rentabilidad_anual)
         object.__setattr__(self, "volatilidad_anualizada", float(volatilidad_anual))
-
-    @property
-    def activo(self) -> str:
-        return str(self.serie_temporal.name)
 
     @property
     def tipo(self) -> str:
@@ -180,6 +186,7 @@ class MacroSeries(SerieTemporal):
         """
         return {
             "nombre": self.nombre,
+            "activo": self.activo,
             "unidad": self.unidad,
             "proveedor": self.proveedor,
             "inicio": self.inicio,
