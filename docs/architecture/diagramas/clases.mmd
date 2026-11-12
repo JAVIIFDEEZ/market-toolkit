@@ -98,8 +98,8 @@ classDiagram
             -_rendimientos_cartera() pd.Series
             +resumen() dict
             +correlacion(t, guardar) pd.DataFrame
-            +report(tasa_libre_riesgo, umbrales, ruta) str
-            +plots_report(mostrar, carpeta, guardar) dict~str, Figure~
+            +report(tasa_libre_riesgo, umbrales, benchmark, formato, ruta) str
+            +plots_report(mostrar, carpeta, guardar, benchmark) dict~str, Figure~
             +simulacion_monte_carlo(...) MonteCarlo
         }
         class informe {
@@ -118,6 +118,8 @@ classDiagram
         class MonteCarlo {
             +n_simulaciones: int
             +horizonte: int
+            +distribucion: normal | t | bootstrap
+            +grados_libertad: float
             +rentabilidades: pd.Series
             +volatilidades: pd.Series
             +pesos: pd.Series
@@ -129,6 +131,30 @@ classDiagram
             +resumen() dict
             +graficar() tuple~Figure~
             +guardar_graficos(n_trayectorias, carpeta) list~Path~
+            +comparar_distribuciones(objetivo, ...)$ pd.DataFrame
+        }
+    }
+
+    namespace analytics {
+        class benchmark {
+            <<module>>
+            +beta(cartera, benchmark) float
+            +alfa_jensen(cartera, benchmark, tasa) float
+            +tracking_error(cartera, benchmark) float
+            +information_ratio(cartera, benchmark) float
+            +metricas_benchmark(...) dict
+        }
+        class distribuciones {
+            <<module>>
+            +grados_libertad_t(rendimientos) float
+        }
+    }
+
+    namespace reporting {
+        class html {
+            <<module>>
+            +markdown_a_html(texto) str
+            +informe_html(texto, figuras) str
         }
     }
 
@@ -179,3 +205,6 @@ classDiagram
     SerieTemporal ..> DataValidationError : lanza
     Portfolio ..> DataValidationError : lanza
     Provider ..> ProviderError : lanza
+    Portfolio ..> benchmark : report(benchmark)
+    Portfolio ..> html : report(formato="html")
+    MonteCarlo ..> distribuciones : estima ν

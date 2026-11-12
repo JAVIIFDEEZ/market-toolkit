@@ -6,7 +6,7 @@ from typing import Literal
 import numpy as np
 import pandas as pd
 
-from market_toolkit.config import DIAS_COTIZACION_ANUAL
+import market_toolkit.analytics as analytics
 from market_toolkit.preprocessing.validation import validar_serie_macro, validar_serie_precios
 
 
@@ -97,8 +97,8 @@ class FinancialSeries(SerieTemporal):
         desviacion = float(rendimientos.std())
         # Rentabilidad compuesta a partir de la rentabilidad diaria
         # y volatilidad por la regla de la raíz
-        rentabilidad_anual = (1 + media) ** DIAS_COTIZACION_ANUAL - 1
-        volatilidad_anual = desviacion * np.sqrt(DIAS_COTIZACION_ANUAL)
+        rentabilidad_anual = analytics.rentabilidad_anualizada(media)
+        volatilidad_anual = analytics.volatilidad_anualizada(desviacion)
         object.__setattr__(self, "rentabilidad_media", media)
         object.__setattr__(self, "desviacion_tipica", desviacion)
         object.__setattr__(self, "rentabilidad_anualizada", rentabilidad_anual)

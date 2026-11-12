@@ -6,6 +6,7 @@ import pandas as pd
 from matplotlib.figure import Figure
 from matplotlib.ticker import FuncFormatter
 
+import market_toolkit.analytics as analytics
 import market_toolkit.simulation.montecarlo as montecarlo
 
 # Colores de identidad de los activos, en orden fijo. A partir del octavo activo, los de menor
@@ -79,13 +80,14 @@ def _periodo(indice: pd.DatetimeIndex) -> str:
 
 
 def dibujar_evolucion(figura: Figure, precios: pd.DataFrame, valor: pd.Series,
-                      colores: dict[str, str]) -> None:
+                      colores: dict[str, str], benchmark: pd.Series | None = None) -> None:
     """
     Compara el valor de la cartera con el de cada activo, todos en base 100.
     :param figura: Figura vacía en la que dibujar.
     :param precios: Precios en USD de cada activo.
     :param valor: Valor de la cartera en base 100.
     :param colores: Color de cada activo con color propio.
+    :param benchmark: Índice de referencia opcional en base 100, que se dibuja discontinuo.
     """
     eje = figura.subplots()
     montecarlo.MonteCarlo._preparar_eje(eje)
@@ -99,12 +101,16 @@ def dibujar_evolucion(figura: Figure, precios: pd.DataFrame, valor: pd.Series,
     for activo, color in colores.items():
         eje.plot(base.index, base[activo], color=color, linewidth=ANCHO_ACTIVO, zorder=2,
                  label=activo)
+    if benchmark is not None:
+        eje.plot(benchmark.index, benchmark, color=montecarlo.COLORES["texto_secundario"],
+                 linewidth=ANCHO_CARTERA, linestyle="--", zorder=3,
+                 label=f"Referencia: {benchmark.name}")
     eje.plot(valor.index, valor, color=montecarlo.COLORES["texto"], linewidth=ANCHO_CARTERA,
-             zorder=3, label="Cartera")
+             zorder=4, label="Cartera")
     eje.axhline(100, color=montecarlo.COLORES["eje"], linewidth=1, zorder=0)
     eje.annotate(f"Cartera {valor.iloc[-1]:,.1f}", (valor.index[-1], valor.iloc[-1]),
                  xytext=(-6, 10), textcoords="offset points", ha="right", fontsize=9,
-                 fontweight="bold", color=montecarlo.COLORES["texto"], zorder=4,
+                 fontweight="bold", color=montecarlo.COLORES["texto"], zorder=5,
                  bbox={"boxstyle": "round,pad=0.2", "facecolor": montecarlo.COLORES["superficie"],
                        "edgecolor": "none", "alpha": 0.85})
     _rematar_fechas(eje)
@@ -121,7 +127,7 @@ def dibujar_drawdown(figura: Figure, valor: pd.Series) -> None:
     """
     eje = figura.subplots()
     montecarlo.MonteCarlo._preparar_eje(eje)
-    caidas = valor.div(valor.cummax()).sub(1)
+    caidas = analytics.caidas(valor)
     color = montecarlo.COLORES["perdida"]
     eje.fill_between(caidas.index, caidas, 0, color=color, alpha=0.3, linewidth=0)
     eje.plot(caidas.index, caidas, color=color, linewidth=1.5)
