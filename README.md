@@ -155,7 +155,7 @@ caída), la demo sigue con datos sintéticos. Todos los resultados se guardan en
 | `outputs/graficos/*.png` | Los seis gráficos de `plots_report()` |
 | `outputs/montecarlo/*.png` | Trayectorias y distribución del valor final de la simulación |
 
-Por defecto, la librería guarda los gráficos en `simulation/graficos/`. La demo los guarda en `outputs/`
+Por defecto, la librería guarda los gráficos en `models/graficos/`. La demo los guarda en `outputs/`
 porque indica esa ruta con el parámetro `carpeta` de `plots_report()` y `guardar_graficos()`.
 
 ## Interfaz web
@@ -968,6 +968,8 @@ cartera.report(incluir_montecarlo=True)    # Riesgo a un año con tres distribuc
 | Simulación de Monte Carlo (1 año) | VaR, CVaR, probabilidad de pérdida y valor final mediano con las distribuciones normal, t de Student y bootstrap histórico |
 
 El índice no forma parte de la cartera (los índices no se pueden comprar): solo sirve de referencia.
+La sección de Monte Carlo simula 5000 trayectorias por distribución; se cambian con
+`simulaciones_montecarlo`.
 
 ### Informe en HTML
 
@@ -1001,8 +1003,9 @@ cartera.plots_report(carpeta="resultados/cartera")   # Guarda en otra carpeta
 | `mostrar` | Muestra los gráficos por pantalla | `True` |
 | `carpeta` | Carpeta de destino de los PNG | `models/graficos/informe/` |
 | `guardar` | Guarda los gráficos como PNG | `True` |
+| `benchmark` | Índice de referencia (`FinancialSeries`) que se añade, discontinuo, al gráfico `evolucion` | `None` |
 
-La ruta `simulation/graficos/informe/` solo se usa si no se indica `carpeta`. Por ejemplo, la
+La ruta `models/graficos/informe/` solo se usa si no se indica `carpeta`. Por ejemplo, la
 [demo](#demo) pasa `carpeta="outputs/graficos"` y deja ahí los PNG.
 
 Cada ejecución sustituye los PNG del informe anterior, sin afectar a `correlacion.png` ni a los
@@ -1082,7 +1085,8 @@ apartado *Cartera*.
 ### Cómo funciona
 
 Cada simulación construye un camino día a día: el valor de hoy se multiplica por un rendimiento
-diario **aleatorio**, sacado de una distribución normal (gaussiana). Repitiendo esto
+diario **aleatorio**, sacado por defecto de una distribución normal (gaussiana); en
+[Distribuciones](#distribuciones) se explican las alternativas. Repitiendo esto
 `n_simulaciones` veces durante `horizonte` sesiones se obtiene un abanico de futuros posibles.
 
 **1. De dónde salen la media y la desviación.** Se parte de dos supuestos anuales:
@@ -1186,7 +1190,8 @@ escenarios no se pierde más de un 24 %, y en los 5 peores se pierde de media un
 dan en tanto por uno sobre el valor inicial (positivos cuando son pérdidas). También se pueden
 pedir con otra confianza, por ejemplo `var(0.99)`.
 
-`resumen()` incluye además el valor final medio y mediano, los percentiles 5 y 95 del valor
+`resumen()` incluye además la distribución usada (y sus grados de libertad si es la t), el valor
+final medio y mediano, los percentiles 5 y 95 del valor
 final, la rentabilidad media, la **probabilidad de pérdida** (porcentaje de escenarios que acaban
 por debajo del valor inicial), el VaR y el CVaR al 95 %.
 
@@ -1200,7 +1205,7 @@ Al crear el objeto se sustituyen los dos gráficos de la simulación anterior en
 - `distribucion.png`: histograma del valor final (pérdidas en naranja y ganancias en verde) con
   el valor inicial, la media, la mediana, el VaR 95 % y el VaR 99 %.
 
-La ruta `simulation/graficos/` es la de por defecto. Para guardarlos en otra carpeta, se crea el objeto
+La ruta `models/graficos/` es la de por defecto. Para guardarlos en otra carpeta, se crea el objeto
 con `guardar_graficos=False` y se llama a `mc.guardar_graficos(carpeta="...")`. Así lo hace la
 [demo](#demo), que los deja en `outputs/montecarlo/`.
 

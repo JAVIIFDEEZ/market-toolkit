@@ -100,16 +100,12 @@ class MonteCarlo:
             tocar la cartera y `True` para mantener los pesos constantes cada día.
         :param semilla: Semilla del generador aleatorio, para obtener resultados reproducibles.
         :param guardar_graficos: `True` para borrar los gráficos de la simulación anterior y
-<<<<<<< HEAD
             guardar los de esta en `models/graficos/` (trayectorias.png y distribucion.png).
-=======
-            guardar los de esta en `simulation/graficos/` (trayectorias.png y distribucion.png).
         :param distribucion: Distribución de los choques diarios: `"normal"` (por defecto),
             `"t"` (t de Student, colas gruesas) o `"bootstrap"` (días reales del histórico).
         :param grados_libertad: Solo con `distribucion="t"`. Grados de libertad de la t (mayor que
             2; cuanto más bajo, colas más gruesas). Si es `None` se estiman de la curtosis
             histórica de los rendimientos.
->>>>>>> origin/main
         """
         if not isinstance(objetivo, series.FinancialSeries | portfolio.Portfolio):
             raise TypeError(

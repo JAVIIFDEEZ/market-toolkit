@@ -867,15 +867,11 @@ class Portfolio:
             `True` para mantener los pesos constantes cada día (rebalanceo diario).
         :param semilla: Semilla del generador aleatorio, para obtener resultados reproducibles.
         :param guardar_graficos: `True` para borrar los gráficos de la simulación anterior y
-<<<<<<< HEAD
             guardar los de esta en `models/graficos/` (trayectorias.png y distribucion.png).
-=======
-            guardar los de esta en `simulation/graficos/` (trayectorias.png y distribucion.png).
         :param distribucion: Distribución de los choques diarios: `"normal"` (por defecto),
             `"t"` (t de Student, colas gruesas) o `"bootstrap"` (días reales del histórico).
         :param grados_libertad: Solo con `distribucion="t"`. Si es `None` se estiman de la
             curtosis histórica.
->>>>>>> origin/main
         :return: El objeto MonteCarlo con los resultados de la simulación.
         """
         sim = montecarlo.MonteCarlo(
