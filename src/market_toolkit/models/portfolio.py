@@ -1,9 +1,11 @@
+from __future__ import annotations
+
 import hashlib
 import warnings
 from collections.abc import Mapping, Sequence
 from itertools import combinations_with_replacement
 from pathlib import Path
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -15,8 +17,10 @@ import market_toolkit.models.informe as informe
 import market_toolkit.simulation.montecarlo as montecarlo
 from market_toolkit.config import DIAS_COTIZACION_ANUAL
 from market_toolkit.exceptions import DataValidationError, InsufficientDataError
-from market_toolkit.models.series import FinancialSeries, MacroSeries, SerieTemporal
 from market_toolkit.preprocessing import juntar_series
+
+if TYPE_CHECKING:
+    from market_toolkit.models.series import FinancialSeries
 
 
 class Portfolio:
@@ -24,12 +28,6 @@ class Portfolio:
     Clase que modela una cartera de inversión.
     """
     TOLERANCIA_PESOS = 1e-6  # Margen para considerar que los pesos de una fecha suman 1
-    MACRO_ADMITIDOS = {
-        "DGS10",  # Bono EE.UU. 10 años, % diario
-        "DGS2",  # Bono EE.UU. 2 años, % diario
-        "IRLTLT01ESM156N",  # Bono España 10 años, % mensual
-        "IRLTLT01DEM156N"  # Bund 10 años, % mensual
-    }
 
     precio_activos: pd.DataFrame
     rendimiento: pd.Series
@@ -40,9 +38,8 @@ class Portfolio:
     desviacion_tipica: float
     rentabilidad_anualizada: float
     volatilidad_anualizada: float
-    _hay_macro: bool
 
-    def __init__(self, activos: Sequence[SerieTemporal], pesos: pd.DataFrame, *,
+    def __init__(self, activos: Sequence[FinancialSeries], pesos: pd.DataFrame, *,
                  alineacion_temporal: Literal["relleno", "eliminacion"] = "eliminacion"):
         """
         Inicializa un objeto de Portfolio.
@@ -58,20 +55,16 @@ class Portfolio:
         # Juntar activos
         self._series = list(activos)
         n_activos = len(activos)
-        activos_macro = [activo for activo in activos if isinstance(activo, MacroSeries)
-                               and activo.activo in self.MACRO_ADMITIDOS]
-        if len(activos_macro) > 0:
-            self._hay_macro = True
-        else:
-            self._hay_macro = False
-        activos_financiero = [activo for activo in activos if isinstance(activo, FinancialSeries)
-                               and activo.tipo_activo != models.TipoActivo.INDICE]
-        activos = activos_macro + activos_financiero
+        activos = list(
+            filter(
+                lambda activo: activo.tipo_activo != models.TipoActivo.INDICE,
+                activos
+            )
+        )
         if len(activos) != n_activos:
             raise DataValidationError(
-                f"Se han introducido activos no válidos en la cartera. "
-                f"Se permiten series financieras que no sean índices y "
-                f"las siguientes series macro: {', '.join(self.MACRO_ADMITIDOS)}"
+                "Se han proporcionado índices como activos. "
+                "Considere en su lugar introducir los ETFs referenciados a dichos índices."
             )
         self.precio_activos = juntar_series(activos, True, alineacion_temporal)
         # Validar pesos
@@ -148,7 +141,7 @@ class Portfolio:
         self._calcular_estadisticos()
         self._borrar_correlacion_si_cambia()
 
-    def _calcular_metadatos_activos(self, activos: Sequence[SerieTemporal]) -> pd.DataFrame:
+    def _calcular_metadatos_activos(self, activos: Sequence[FinancialSeries]) -> pd.DataFrame:
         """
         Recalcula los metadatos de los activos que forman la cartera tras la alineacion temporal.
         :param activos: Lista de series temporales de la cartera.
@@ -160,29 +153,16 @@ class Portfolio:
         rentabilidades = self.precio_activos.pct_change().dropna()
         medias = rentabilidades.mean()
         desviaciones = rentabilidades.std()
+        rentabilidades_anual = (1 + medias) ** DIAS_COTIZACION_ANUAL - 1
+        volatilidades_anual = desviaciones * np.sqrt(DIAS_COTIZACION_ANUAL)
         info.loc["moneda"] = "USD"
         info.loc["inicio"] = self.precio_activos.index[0].date()
         info.loc["fin"] = self.precio_activos.index[-1].date()
         info.loc["observaciones"] = len(self.precio_activos)
-        if self._hay_macro:
-            info.loc["media"] = medias
-            info.loc["desviacion_tipica"] = desviaciones
-            info = info.drop(
-                index=[
-                    "media_diaria",
-                    "desviacion_tipica_diaria",
-                    "rentabilidad_anualizada",
-                    "volatilidad_anualizada"
-                ],
-                errors="ignore"
-            )
-        else:
-            rentabilidades_anual = (1 + medias) ** DIAS_COTIZACION_ANUAL - 1
-            volatilidades_anual = desviaciones * np.sqrt(DIAS_COTIZACION_ANUAL)
-            info.loc["media_diaria"] = medias
-            info.loc["desviacion_tipica_diaria"] = desviaciones
-            info.loc["rentabilidad_anualizada"] = rentabilidades_anual
-            info.loc["volatilidad_anualizada"] = volatilidades_anual
+        info.loc["media_diaria"] = medias
+        info.loc["desviacion_tipica_diaria"] = desviaciones
+        info.loc["rentabilidad_anualizada"] = rentabilidades_anual
+        info.loc["volatilidad_anualizada"] = volatilidades_anual
         return info
 
     def _calcular_pesos_activos(
@@ -217,8 +197,6 @@ class Portfolio:
         factores = crecimiento.groupby(tramos).shift(1).fillna(1)
         # Evolución de los pesos, normalizados para que sumen 1
         pesos_evolucionados = cambios.reindex(rentabilidades.index).ffill() * factores
-
-
         return pesos_evolucionados.div(pesos_evolucionados.sum(axis=1), axis=0)
 
     @property
@@ -469,7 +447,7 @@ class Portfolio:
             confianza_es: float = 0.95,
             max_concentracion: float = 0.50,
             max_correlacion: float = 0.80,
-            min_historial: int = 252,
+            max_historial: int = 252,
             min_activos_efectivos: float = 3.0,
             max_correlacion_diversificada: float = 0.30,
             min_sharpe: float = 1.0,
@@ -488,7 +466,7 @@ class Portfolio:
         :param confianza_es: Nivel de confianza del Expected Shortfall histórico.
         :param max_concentracion: Peso máximo aceptado para un activo.
         :param max_correlacion: Correlación media máxima antes de emitir advertencia.
-        :param min_historial: Número mínimo de rendimientos diarios esperados.
+        :param max_historial: Número mínimo de rendimientos diarios esperados.
         :param min_activos_efectivos: Número efectivo mínimo para considerar diversificada.
         :param max_correlacion_diversificada: Correlación máxima para destacar diversificación.
         :param min_sharpe: Sharpe mínimo para destacar esta fortaleza.
@@ -512,12 +490,12 @@ class Portfolio:
                     or not isinstance(valor, (int, float, np.integer, np.floating))
                     or not np.isfinite(valor)):
                 raise ValueError(f"`{clave}` debe ser un número finito.")
-        if (isinstance(min_historial, bool)
-                or not isinstance(min_historial, (int, np.integer))):
-            raise ValueError("`min_historial` debe ser un entero positivo.")
-        min_historial = int(min_historial)
-        if min_historial < 1:
-            raise ValueError("`min_historial` debe ser un entero positivo.")
+        if (isinstance(max_historial, bool)
+                or not isinstance(max_historial, (int, np.integer))):
+            raise ValueError("`max_historial` debe ser un entero positivo.")
+        max_historial = int(max_historial)
+        if max_historial < 1:
+            raise ValueError("`max_historial` debe ser un entero positivo.")
         if not 0 < confianza_es < 1:
             raise ValueError("`confianza_es` debe estar entre 0 y 1, sin incluirlos.")
         if not 0 <= max_concentracion <= 1:
@@ -631,10 +609,10 @@ class Portfolio:
             advertencias.append(
                 f"Correlación elevada entre **{activo_a}** y **{activo_b}**: {correlacion:.2f}."
             )
-        if numero_sesiones < min_historial:
+        if numero_sesiones < max_historial:
             advertencias.append(
                 f"Historial corto: {numero_sesiones} sesiones con rendimientos; "
-                f"se requieren {min_historial} para alcanzar el umbral configurado."
+                f"se requieren {max_historial} para alcanzar el umbral configurado."
             )
         for activo, cobertura in coberturas.items():
             if cobertura < min_cobertura:

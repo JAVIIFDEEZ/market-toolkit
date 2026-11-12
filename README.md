@@ -535,7 +535,7 @@ series = macro.download(inicio="2024-01-01")
 series = macro.download(inicio="2020-01-01", periodo="1y")    # Del 2020-01-01 al 2021-01-01
 
 for s in macro.download(inicio="2024-01-01"):
-    print(s.activo, s.nombre, s.unidad, s.observaciones)
+    print(s.serie_temporal.name, s.nombre, s.unidad, s.observaciones)
 ```
 
 ```
@@ -557,7 +557,6 @@ dgs10.resumen()
 
 ```
 nombre             Market Yield on U.S. Treasury Securities at 10-Year Constant Maturity, Quoted on an Investment Basis
-activo             DGS10
 unidad             %
 proveedor          FRED
 inicio             2024-01-02
@@ -665,9 +664,7 @@ cartera = Portfolio(series, pesos)
 
 Requisitos de los activos:
 
-- Deben ser un activo que se pueda comprar, esto es:
-  - Una `FinancialSeries` de tipo ACCION, COMMODITY o ETF.
-  - Un `MacroSeries` que sea uno de los siguientes activos: DGS10, DGS2, IRLTLT01ESM156N o IRLTLT01DEM156N.
+- Deben ser un activo que se pueda comprar, esto es, una `FinancialSeries` de tipo ACCION, COMMODITY o ETF.
 
 Requisitos de los pesos:
 
