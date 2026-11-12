@@ -16,7 +16,9 @@ COLORES_ACTIVOS = ("#2a78d6", "#eb6834", "#1baf7a", "#eda100",
 COLOR_OTROS = "#c3c2b7"
 ANCHO_CARTERA = 2.5
 ANCHO_ACTIVO = 1.2
-_PORCENTAJE = FuncFormatter(lambda valor, _: f"{valor:.0%}")
+# Porcentaje del eje con un decimal solo cuando hace falta (2.5 %), para no redondear las marcas
+_PORCENTAJE = FuncFormatter(
+    lambda valor, _: f"{valor:.0%}" if abs(round(valor * 100, 1) % 1) < 1e-9 else f"{valor:.1%}")
 
 
 def colores_activos(pesos: pd.DataFrame) -> dict[str, str]:

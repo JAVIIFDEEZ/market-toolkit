@@ -100,7 +100,7 @@ class MonteCarlo:
             tocar la cartera y `True` para mantener los pesos constantes cada día.
         :param semilla: Semilla del generador aleatorio, para obtener resultados reproducibles.
         :param guardar_graficos: `True` para borrar los gráficos de la simulación anterior y
-            guardar los de esta en `simulation/graficos/` (trayectorias.png y distribucion.png).
+            guardar los de esta en `models/graficos/` (trayectorias.png y distribucion.png).
         :param distribucion: Distribución de los choques diarios: `"normal"` (por defecto),
             `"t"` (t de Student, colas gruesas) o `"bootstrap"` (días reales del histórico).
         :param grados_libertad: Solo con `distribucion="t"`. Grados de libertad de la t (mayor que
@@ -539,7 +539,7 @@ class MonteCarlo:
         Borra los gráficos (PNG) de la simulación anterior y guarda los de esta:
         `trayectorias.png` y `distribucion.png`. Se llama automáticamente al crear el objeto.
         :param n_trayectorias: Número de trayectorias individuales a dibujar de fondo.
-        :param carpeta: Carpeta de destino. Por defecto, `simulation/graficos/`.
+        :param carpeta: Carpeta de destino. Por defecto, `models/graficos/`.
         :return: Las rutas de los ficheros guardados.
         """
         carpeta = Path(carpeta)

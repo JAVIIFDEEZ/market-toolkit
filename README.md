@@ -155,7 +155,7 @@ caída), la demo sigue con datos sintéticos. Todos los resultados se guardan en
 | `outputs/graficos/*.png` | Los seis gráficos de `plots_report()` |
 | `outputs/montecarlo/*.png` | Trayectorias y distribución del valor final de la simulación |
 
-Por defecto, la librería guarda los gráficos en `simulation/graficos/`. La demo los guarda en `outputs/`
+Por defecto, la librería guarda los gráficos en `models/graficos/`. La demo los guarda en `outputs/`
 porque indica esa ruta con el parámetro `carpeta` de `plots_report()` y `guardar_graficos()`.
 
 ## Interfaz web
@@ -264,13 +264,27 @@ market-toolkit/
 Todos los proveedores siguen la misma estructura: se crean con una lista de tickers (o series),
 validan que existen y `download()` devuelve una **lista de series** ya limpias y validadas.
 
-Las API keys se leen del fichero `.env` (si no están, se piden por pantalla):
+Las API keys se leen del fichero `.env` (si no están, se piden por pantalla). Polygon, Alpha
+Vantage y FRED también aceptan la clave como argumento: `api_key="..."`.
 
 ```
 ALPHAVANTAGE_API_KEY=tu_clave
 POLYGON_API_KEY=tu_clave
 FRED_API_KEY=tu_clave
 ```
+
+Una serie de precios necesita al menos **30 observaciones**. Si el periodo pedido tiene menos
+(por ejemplo, unos días o un mes), la descarga lanza `InsufficientDataError`.
+
+Los tickers de un proveedor se pueden cambiar después de crearlo:
+
+```python
+proveedor.incorporar_tickers(["MSFT"])   # Añade tickers
+proveedor.eliminar_tickers(["AAPL"])     # Quita tickers
+```
+
+`incorporar_tickers` **no valida** los tickers nuevos ni traduce los alias: hay que usar el
+ticker o el ID exacto. Los que no existan fallarán al descargar.
 
 <details>
 <summary><h3>Acciones / Stocks</h3></summary>
@@ -302,6 +316,8 @@ Polygon object tickers<AAPL, MSFT>
 ```
 
 La API key también se puede pasar como argumento: `PolygonProvider(["AAPL"], api_key="...")`.
+Si se supera el límite de llamadas (`RateLimitError`), se puede aumentar la espera entre llamadas:
+`PolygonProvider(["AAPL"], pausa=15)`.
 
 #### Descargar
 
@@ -415,7 +431,7 @@ df.tail(3)
 <summary><h3 id="indices-market-index">Índices / Market Index y ETFs</h3></summary>
 
 Se pueden descargar con `YahooFinanceProvider`, que admite acciones; índices, que deben empezar por
-el símpolo `^` (por ejemplo `^GSPC` o `^IBEX`); y ETFs. Los tickers que no se correspondan con
+el símbolo `^` (por ejemplo `^GSPC` o `^IBEX`); y ETFs. Los tickers que no se correspondan con
 activos almacenados en la base de datos de Yahoo Finance se descartan.
 
 #### Crear el proveedor
@@ -451,7 +467,7 @@ YahooFinanceProvider object tickers<AAPL, SPY, ^GSPC>
 
 ```python
 series = yahoo.download()                                   # Histórico máximo de Yahoo Finance (por defecto)
-series = yahoo.download(periodo="6mo")                      # "1d", "5d", "3mo", "6mo", "1y", "2y", "5y", "10y" "max"
+series = yahoo.download(periodo="6mo")                      # "3mo", "6mo", "ytd", "1y", "2y", "5y", "10y" o "max"
 series = yahoo.download(inicio="2025-01-01", fin="2025-06-30")
 series = yahoo.download(fin="2026-01-01", periodo="6mo")    # Del 2025-07-01 al 2026-01-01
 
@@ -466,7 +482,8 @@ SPY ETF Yahoo Finance 1993-01-29 2026-11-09 8503
 ```
 
 Si solo se indica `inicio` o `fin`, `periodo` calcula la otra fecha; con las dos fechas, se
-ignora.
+ignora. En Yahoo Finance la fecha `fin` **no se incluye**: `inicio="2025-01-01", fin="2025-06-30"`
+descarga hasta el 27 de junio, la última sesión anterior al 30.
 
 </details>
 
@@ -477,7 +494,7 @@ Se pueden descargar con `AlphaVantageProvider`. Únicamente admite las materias 
 Los tickers que no se correspondan con ninguno de estos activos se descartan.
 
 El plan gratuito tiene dos limitaciones que el proveedor gestiona solo:
-- Solo se permite realizar 25 llamada al día. En caso de superarlas se lanza una excepción `ProviderError`.
+- Solo se permite realizar 25 llamadas al día. En caso de superarlas se lanza una excepción `ProviderError`.
 - Solo permite **1 llamada por segundo**: espera `pausa` segundos (1.1 por defecto) entre
   llamadas.
 
@@ -501,8 +518,8 @@ AlphaVantageProvider object tickers<BRENT, GOLD>
 |----------|-----------------------------|----------------------------------------|
 | ORO      | GOLD                        | Precio del oro                         |
 | GOLD     | GOLD                        | Precio del oro                         |
-| XAU      | SILVER                      | Precio del oro                         |
-| PLATA    | SILVER                      | Precio del oro                         |
+| XAU      | GOLD                        | Precio del oro                         |
+| PLATA    | SILVER                      | Precio de la plata                     |
 | SILVER   | SILVER                      | Precio de la plata                     |
 | XAG      | SILVER                      | Precio de la plata                     |
 | PETRÓLEO | BRENT                       | Precio del barril de petróleo de Brent |
@@ -539,20 +556,29 @@ ignora.
 Se descargan con `MacroProvider`, que usa la API de FRED y, para datos históricos tal y como se
 publicaron (sin revisiones posteriores), ALFRED.
 
-Las series se indican con su ID de FRED (por ejemplo `DGS10`) o con un alias de
-`MacroProvider.SERIES`:
+Las series se indican con su ID de FRED (por ejemplo `DGS10`) o con uno de los alias
+preestablecidos en `MacroProvider.SERIES`. Los alias no distinguen mayúsculas y minúsculas, y
+cualquier otro ID de FRED también funciona aunque no esté en la lista.
 
-| Alias | ID de FRED | Serie |
-|---|---|---|
-| `us10y` / `us2y` | `DGS10` / `DGS2` | Bono EE.UU. 10 / 2 años (%) |
-| `us10y_2y` | `T10Y2Y` | Spread 10Y-2Y EE.UU. |
-| `ipc_eurozona` | `CP0000EZ19M086NEST` | IPC armonizado de la Eurozona |
-| `pib_espana` | `CLVMNACSCAB1GQES` | PIB real de España (trimestral) |
-| `pib_eeuu` | `GDPC1` | PIB real de EE.UU. (trimestral) |
-| `es10y` / `de10y` | `IRLTLT01ESM156N` / `IRLTLT01DEM156N` | Bono España / Alemania 10 años |
-| `bce_depo` / `fed_funds` | `ECBDFR` / `DFF` | Tipo de depósito del BCE / Fed Funds |
-| `cpi_eeuu` / `paro_eeuu` | `CPIAUCSL` / `UNRATE` | IPC / paro de EE.UU. |
-| `eurusd`, `vix`, `wti`, `hy_spread`, `breakeven10y` | ... | Ver `MacroProvider.SERIES` |
+| Alias | ID de FRED | Serie | Unidad | Frecuencia |
+|---|---|---|---|---|
+| `us10y` | `DGS10` | Bono de EE.UU. a 10 años | % | Diaria |
+| `us2y` | `DGS2` | Bono de EE.UU. a 2 años | % | Diaria |
+| `us10y_2y` | `T10Y2Y` | Diferencial 10 años - 2 años de EE.UU. | % | Diaria |
+| `es10y` | `IRLTLT01ESM156N` | Bono de España a 10 años | % | Mensual |
+| `de10y` | `IRLTLT01DEM156N` | Bund alemán a 10 años | % | Mensual |
+| `breakeven10y` | `T10YIE` | Inflación implícita a 10 años de EE.UU. | % | Diaria |
+| `hy_spread` | `BAMLH0A0HYM2` | Diferencial de los bonos High Yield de EE.UU. | % | Diaria |
+| `bce_depo` | `ECBDFR` | Facilidad de depósito del BCE | % | Diaria, 7 días a la semana |
+| `fed_funds` | `DFF` | Tipo efectivo de los Fed Funds | % | Diaria, 7 días a la semana |
+| `ipc_eurozona` | `CP0000EZ19M086NEST` | IPC armonizado de la Eurozona | Índice 2025 = 100 | Mensual |
+| `cpi_eeuu` | `CPIAUCSL` | IPC de EE.UU. | Índice 1982-1984 = 100 | Mensual |
+| `pib_espana` | `CLVMNACSCAB1GQES` | PIB real de España | Millones de € encadenados de 2010 | Trimestral |
+| `pib_eeuu` | `GDPC1` | PIB real de EE.UU. | Miles de millones de $ encadenados de 2017 | Trimestral |
+| `paro_eeuu` | `UNRATE` | Tasa de paro de EE.UU. | % | Mensual |
+| `eurusd` | `DEXUSEU` | Tipo de cambio euro-dólar | Dólares por euro | Diaria |
+| `wti` | `DCOILWTICO` | Petróleo WTI | $ por barril | Diaria |
+| `vix` | `VIXCLS` | Índice de volatilidad VIX | Índice | Diaria |
 
 #### Crear el proveedor
 
@@ -807,7 +833,7 @@ volatilidad_anualizada     0.325491    0.328106    0.281661
 
 `correlacion(t=x)` calcula la correlación entre los rendimientos diarios en USD de los activos
 durante los últimos `x` años de la cartera (admite fracciones). Devuelve la matriz y la guarda
-como imagen en `simulation/graficos/correlacion.png`, con escala de -1 a 1.
+como imagen en `models/graficos/correlacion.png`, con escala de -1 a 1.
 
 ```python
 cartera.correlacion(t=0.5)      # Últimos 6 meses
@@ -942,6 +968,8 @@ cartera.report(incluir_montecarlo=True)    # Riesgo a un año con tres distribuc
 | Simulación de Monte Carlo (1 año) | VaR, CVaR, probabilidad de pérdida y valor final mediano con las distribuciones normal, t de Student y bootstrap histórico |
 
 El índice no forma parte de la cartera (los índices no se pueden comprar): solo sirve de referencia.
+La sección de Monte Carlo simula 5000 trayectorias por distribución; se cambian con
+`simulaciones_montecarlo`.
 
 ### Informe en HTML
 
@@ -960,7 +988,7 @@ traduce a HTML, sin librerías adicionales.
 ### Informe gráfico
 
 `plots_report()` genera seis gráficos de la cartera sobre todo su periodo, en USD. Los muestra por
-pantalla, los guarda como PNG en `simulation/graficos/informe/` y devuelve un diccionario
+pantalla, los guarda como PNG en `models/graficos/informe/` y devuelve un diccionario
 `{nombre: figura}`:
 
 ```python
@@ -973,10 +1001,11 @@ cartera.plots_report(carpeta="resultados/cartera")   # Guarda en otra carpeta
 | Parámetro | Qué hace | Por defecto |
 |---|---|---|
 | `mostrar` | Muestra los gráficos por pantalla | `True` |
-| `carpeta` | Carpeta de destino de los PNG | `simulation/graficos/informe/` |
+| `carpeta` | Carpeta de destino de los PNG | `models/graficos/informe/` |
 | `guardar` | Guarda los gráficos como PNG | `True` |
+| `benchmark` | Índice de referencia (`FinancialSeries`) que se añade, discontinuo, al gráfico `evolucion` | `None` |
 
-La ruta `simulation/graficos/informe/` solo se usa si no se indica `carpeta`. Por ejemplo, la
+La ruta `models/graficos/informe/` solo se usa si no se indica `carpeta`. Por ejemplo, la
 [demo](#demo) pasa `carpeta="outputs/graficos"` y deja ahí los PNG.
 
 Cada ejecución sustituye los PNG del informe anterior, sin afectar a `correlacion.png` ni a los
@@ -1056,7 +1085,8 @@ apartado *Cartera*.
 ### Cómo funciona
 
 Cada simulación construye un camino día a día: el valor de hoy se multiplica por un rendimiento
-diario **aleatorio**, sacado de una distribución normal (gaussiana). Repitiendo esto
+diario **aleatorio**, sacado por defecto de una distribución normal (gaussiana); en
+[Distribuciones](#distribuciones) se explican las alternativas. Repitiendo esto
 `n_simulaciones` veces durante `horizonte` sesiones se obtiene un abanico de futuros posibles.
 
 **1. De dónde salen la media y la desviación.** Se parte de dos supuestos anuales:
@@ -1160,21 +1190,22 @@ escenarios no se pierde más de un 24 %, y en los 5 peores se pierde de media un
 dan en tanto por uno sobre el valor inicial (positivos cuando son pérdidas). También se pueden
 pedir con otra confianza, por ejemplo `var(0.99)`.
 
-`resumen()` incluye además el valor final medio y mediano, los percentiles 5 y 95 del valor
+`resumen()` incluye además la distribución usada (y sus grados de libertad si es la t), el valor
+final medio y mediano, los percentiles 5 y 95 del valor
 final, la rentabilidad media, la **probabilidad de pérdida** (porcentaje de escenarios que acaban
 por debajo del valor inicial), el VaR y el CVaR al 95 %.
 
 ### Gráficos
 
 Al crear el objeto se sustituyen los dos gráficos de la simulación anterior en
-`simulation/graficos/` (con `mc.graficar()` también se muestran por pantalla):
+`models/graficos/` (con `mc.graficar()` también se muestran por pantalla):
 
 - `trayectorias.png`: una muestra de caminos, las bandas de percentiles 5-95 y 25-75, la media y
   la mediana.
 - `distribucion.png`: histograma del valor final (pérdidas en naranja y ganancias en verde) con
   el valor inicial, la media, la mediana, el VaR 95 % y el VaR 99 %.
 
-La ruta `simulation/graficos/` es la de por defecto. Para guardarlos en otra carpeta, se crea el objeto
+La ruta `models/graficos/` es la de por defecto. Para guardarlos en otra carpeta, se crea el objeto
 con `guardar_graficos=False` y se llama a `mc.guardar_graficos(carpeta="...")`. Así lo hace la
 [demo](#demo), que los deja en `outputs/montecarlo/`.
 
