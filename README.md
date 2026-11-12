@@ -220,13 +220,27 @@ market-toolkit/
 Todos los proveedores siguen la misma estructura: se crean con una lista de tickers (o series),
 validan que existen y `download()` devuelve una **lista de series** ya limpias y validadas.
 
-Las API keys se leen del fichero `.env` (si no están, se piden por pantalla):
+Las API keys se leen del fichero `.env` (si no están, se piden por pantalla). Polygon, Alpha
+Vantage y FRED también aceptan la clave como argumento: `api_key="..."`.
 
 ```
 ALPHAVANTAGE_API_KEY=tu_clave
 POLYGON_API_KEY=tu_clave
 FRED_API_KEY=tu_clave
 ```
+
+Una serie de precios necesita al menos **30 observaciones**. Si el periodo pedido tiene menos
+(por ejemplo, unos días o un mes), la descarga lanza `InsufficientDataError`.
+
+Los tickers de un proveedor se pueden cambiar después de crearlo:
+
+```python
+proveedor.incorporar_tickers(["MSFT"])   # Añade tickers
+proveedor.eliminar_tickers(["AAPL"])     # Quita tickers
+```
+
+`incorporar_tickers` **no valida** los tickers nuevos ni traduce los alias: hay que usar el
+ticker o el ID exacto. Los que no existan fallarán al descargar.
 
 <details>
 <summary><h3>Acciones / Stocks</h3></summary>
@@ -258,6 +272,8 @@ Polygon object tickers<AAPL, MSFT>
 ```
 
 La API key también se puede pasar como argumento: `PolygonProvider(["AAPL"], api_key="...")`.
+Si se supera el límite de llamadas (`RateLimitError`), se puede aumentar la espera entre llamadas:
+`PolygonProvider(["AAPL"], pausa=15)`.
 
 #### Descargar
 
@@ -371,7 +387,7 @@ df.tail(3)
 <summary><h3 id="indices-market-index">Índices / Market Index y ETFs</h3></summary>
 
 Se pueden descargar con `YahooFinanceProvider`, que admite acciones; índices, que deben empezar por
-el símpolo `^` (por ejemplo `^GSPC` o `^IBEX`); y ETFs. Los tickers que no se correspondan con
+el símbolo `^` (por ejemplo `^GSPC` o `^IBEX`); y ETFs. Los tickers que no se correspondan con
 activos almacenados en la base de datos de Yahoo Finance se descartan.
 
 #### Crear el proveedor
@@ -407,7 +423,7 @@ YahooFinanceProvider object tickers<AAPL, SPY, ^GSPC>
 
 ```python
 series = yahoo.download()                                   # Histórico máximo de Yahoo Finance (por defecto)
-series = yahoo.download(periodo="6mo")                      # "1d", "5d", "3mo", "6mo", "1y", "2y", "5y", "10y" "max"
+series = yahoo.download(periodo="6mo")                      # "3mo", "6mo", "ytd", "1y", "2y", "5y", "10y" o "max"
 series = yahoo.download(inicio="2025-01-01", fin="2025-06-30")
 series = yahoo.download(fin="2026-01-01", periodo="6mo")    # Del 2025-07-01 al 2026-01-01
 
@@ -422,7 +438,8 @@ SPY ETF Yahoo Finance 1993-01-29 2026-11-09 8503
 ```
 
 Si solo se indica `inicio` o `fin`, `periodo` calcula la otra fecha; con las dos fechas, se
-ignora.
+ignora. En Yahoo Finance la fecha `fin` **no se incluye**: `inicio="2025-01-01", fin="2025-06-30"`
+descarga hasta el 27 de junio, la última sesión anterior al 30.
 
 </details>
 
@@ -433,7 +450,7 @@ Se pueden descargar con `AlphaVantageProvider`. Únicamente admite las materias 
 Los tickers que no se correspondan con ninguno de estos activos se descartan.
 
 El plan gratuito tiene dos limitaciones que el proveedor gestiona solo:
-- Solo se permite realizar 25 llamada al día. En caso de superarlas se lanza una excepción `ProviderError`.
+- Solo se permite realizar 25 llamadas al día. En caso de superarlas se lanza una excepción `ProviderError`.
 - Solo permite **1 llamada por segundo**: espera `pausa` segundos (1.1 por defecto) entre
   llamadas.
 
@@ -457,8 +474,8 @@ AlphaVantageProvider object tickers<BRENT, GOLD>
 |----------|-----------------------------|----------------------------------------|
 | ORO      | GOLD                        | Precio del oro                         |
 | GOLD     | GOLD                        | Precio del oro                         |
-| XAU      | SILVER                      | Precio del oro                         |
-| PLATA    | SILVER                      | Precio del oro                         |
+| XAU      | GOLD                        | Precio del oro                         |
+| PLATA    | SILVER                      | Precio de la plata                     |
 | SILVER   | SILVER                      | Precio de la plata                     |
 | XAG      | SILVER                      | Precio de la plata                     |
 | PETRÓLEO | BRENT                       | Precio del barril de petróleo de Brent |
