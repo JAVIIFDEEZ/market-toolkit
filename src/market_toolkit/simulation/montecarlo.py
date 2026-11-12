@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from pathlib import Path
+from typing import Literal
 
 import matplotlib.dates as mdates
 import matplotlib.pyplot as plt
@@ -11,9 +12,12 @@ from matplotlib.figure import Figure
 
 import market_toolkit.models.portfolio as portfolio
 import market_toolkit.models.series as series
+from market_toolkit.analytics import grados_libertad_t
 from market_toolkit.config import DIAS_COTIZACION_ANUAL
 
 Supuesto = float | Mapping[str, float] | None
+Distribucion = Literal["normal", "t", "bootstrap"]
+DISTRIBUCIONES = ("normal", "t", "bootstrap")
 
 # Carpeta donde se guardan los gráficos de la simulación y de la cartera
 CARPETA_GRAFICOS = Path(__file__).parents[1] / "models" / "graficos"
@@ -46,10 +50,18 @@ class MonteCarlo:
     Simulación de Monte Carlo de la evolución del valor de un activo (`FinancialSeries`) o de
     una cartera (`Portfolio`). La simulación se lanza automáticamente al crear el objeto.
 
-    Cada activo sigue un movimiento browniano geométrico: su rendimiento logarítmico diario es
-    normal, con la volatilidad indicada y una deriva que hace que la rentabilidad esperada sea la
-    indicada. En una cartera los activos se simulan a la vez, con las correlaciones históricas de
-    sus rendimientos, y se combinan con los pesos actuales de la cartera.
+    Cada activo sigue un movimiento browniano geométrico: su rendimiento logarítmico diario tiene
+    la volatilidad indicada y una deriva que hace que la rentabilidad esperada sea la indicada. En
+    una cartera los activos se simulan a la vez, con las correlaciones históricas de sus
+    rendimientos, y se combinan con los pesos actuales de la cartera.
+
+    La forma de los choques diarios se elige con `distribucion`:
+
+    - `"normal"`: normales correlacionadas (descomposición de Cholesky).
+    - `"t"`: t de Student multivariante, con las mismas correlaciones y volatilidades pero colas
+      más gruesas: las caídas extremas son más probables, como en los mercados reales.
+    - `"bootstrap"`: días reales del histórico elegidos al azar (filas completas, para conservar
+      las correlaciones), reescalados a la volatilidad indicada. No supone ninguna distribución.
     """
 
     trayectorias: pd.DataFrame
@@ -69,6 +81,8 @@ class MonteCarlo:
         rebalanceo: bool = False,
         semilla: int | None = None,
         guardar_graficos: bool = True,
+        distribucion: Distribucion = "normal",
+        grados_libertad: float | None = None,
     ) -> None:
         """
         Inicializa y ejecuta la simulación.
@@ -86,7 +100,16 @@ class MonteCarlo:
             tocar la cartera y `True` para mantener los pesos constantes cada día.
         :param semilla: Semilla del generador aleatorio, para obtener resultados reproducibles.
         :param guardar_graficos: `True` para borrar los gráficos de la simulación anterior y
+<<<<<<< HEAD
             guardar los de esta en `models/graficos/` (trayectorias.png y distribucion.png).
+=======
+            guardar los de esta en `simulation/graficos/` (trayectorias.png y distribucion.png).
+        :param distribucion: Distribución de los choques diarios: `"normal"` (por defecto),
+            `"t"` (t de Student, colas gruesas) o `"bootstrap"` (días reales del histórico).
+        :param grados_libertad: Solo con `distribucion="t"`. Grados de libertad de la t (mayor que
+            2; cuanto más bajo, colas más gruesas). Si es `None` se estiman de la curtosis
+            histórica de los rendimientos.
+>>>>>>> origin/main
         """
         if not isinstance(objetivo, series.FinancialSeries | portfolio.Portfolio):
             raise TypeError(
@@ -96,6 +119,13 @@ class MonteCarlo:
             raise ValueError("El número de simulaciones debe ser un entero mayor que 0.")
         if not isinstance(horizonte, int) or horizonte < 1:
             raise ValueError("El horizonte debe ser un número entero de sesiones mayor que 0.")
+        if distribucion not in DISTRIBUCIONES:
+            raise ValueError(
+                f"Distribución no válida: {distribucion}. Usa una de: {', '.join(DISTRIBUCIONES)}.")
+        if grados_libertad is not None and distribucion != "t":
+            raise ValueError("`grados_libertad` solo se usa con distribucion='t'.")
+        if grados_libertad is not None and not grados_libertad > 2:
+            raise ValueError("Los grados de libertad deben ser mayores que 2.")
         self.objetivo = objetivo
         self.n_simulaciones = n_simulaciones
         self.horizonte = horizonte
@@ -125,6 +155,20 @@ class MonteCarlo:
         if self.valor_inicial <= 0:
             raise ValueError("El valor inicial debe ser mayor que 0.")
         self.correlaciones = precios.pct_change(fill_method=None).dropna().corr()
+        # Rendimientos logarítmicos históricos: para estimar las colas y para el bootstrap
+        self._rendimientos_historicos = np.log(precios).diff().dropna()
+        self.distribucion = distribucion
+        self.grados_libertad = None
+        if distribucion == "t":
+            if grados_libertad is None:
+                # Una ν común para toda la cartera: la mediana de la de cada activo
+                grados_libertad = float(np.median([
+                    grados_libertad_t(self._rendimientos_historicos[activo])
+                    for activo in self._rendimientos_historicos.columns
+                ]))
+            self.grados_libertad = float(grados_libertad)
+        if distribucion == "bootstrap" and len(self._rendimientos_historicos) < 2:
+            raise ValueError("El bootstrap necesita al menos dos rendimientos históricos.")
         self.fecha_inicio = precios.index[-1]
         self.trayectorias = self._simular()
         if guardar_graficos:
@@ -183,8 +227,7 @@ class MonteCarlo:
         vol_diaria = self.volatilidades.to_numpy() / np.sqrt(DIAS_COTIZACION_ANUAL)
         # Deriva logarítmica para que el rendimiento diario esperado sea `media_diaria`
         deriva = np.log1p(media_diaria) - vol_diaria ** 2 / 2
-        aleatorios = rng.standard_normal((self.horizonte, self.n_simulaciones, n_activos))
-        choques = aleatorios @ self._factor_covarianzas(vol_diaria).T
+        choques = self._choques(rng, vol_diaria, n_activos)
         crecimiento = np.exp(deriva + choques)  # Valor de 1 € de cada activo tras cada sesión
 
         if self.pesos is None:
@@ -200,6 +243,79 @@ class MonteCarlo:
         fechas = pd.bdate_range(self.fecha_inicio, periods=self.horizonte + 1, name="fecha")
         return pd.DataFrame(valores, index=fechas,
                             columns=pd.RangeIndex(self.n_simulaciones, name="simulacion"))
+
+    def _choques(self, rng: np.random.Generator, vol_diaria: np.ndarray,
+                 n_activos: int) -> np.ndarray:
+        """
+        Genera los choques aleatorios diarios de cada activo según la distribución elegida.
+        :param rng: Generador aleatorio.
+        :param vol_diaria: Volatilidad diaria de cada activo.
+        :param n_activos: Número de activos.
+        :return: Array (sesiones x simulaciones x activos) con media 0 y la volatilidad indicada.
+        """
+        forma = (self.horizonte, self.n_simulaciones, n_activos)
+        if self.distribucion == "bootstrap":
+            # Días reales del histórico, estandarizados por activo y reescalados a la volatilidad
+            # supuesta: se conservan las colas y las correlaciones reales de cada día
+            historico = self._rendimientos_historicos.to_numpy()
+            desviaciones = historico.std(axis=0, ddof=1)
+            desviaciones[desviaciones == 0] = 1.0
+            estandarizados = (historico - historico.mean(axis=0)) / desviaciones
+            dias = rng.integers(0, len(historico), size=forma[:2])
+            return estandarizados[dias] * vol_diaria
+        choques = rng.standard_normal(forma) @ self._factor_covarianzas(vol_diaria).T
+        if self.distribucion == "t":
+            # t multivariante: el mismo factor chi-cuadrado divide los choques de todos los activos
+            # de un día, y se escala para que la varianza siga siendo la indicada
+            nu = self.grados_libertad
+            chi2 = rng.chisquare(nu, size=(*forma[:2], 1))
+            choques = choques * np.sqrt((nu - 2) / chi2)
+        return choques
+
+    @classmethod
+    def comparar_distribuciones(
+        cls,
+        objetivo: series.FinancialSeries | portfolio.Portfolio,
+        *,
+        n_simulaciones: int = 5000,
+        horizonte: int = DIAS_COTIZACION_ANUAL,
+        semilla: int | None = 42,
+        **opciones,
+    ) -> pd.DataFrame:
+        """
+        Simula el mismo activo o cartera con las tres distribuciones y compara el riesgo de cola.
+        :param objetivo: El activo o la cartera a simular.
+        :param n_simulaciones: Número de trayectorias de cada simulación.
+        :param horizonte: Número de sesiones bursátiles a simular.
+        :param semilla: Semilla común, para que la comparación sea reproducible.
+        :param opciones: Otros parámetros de `MonteCarlo` (rentabilidad, volatilidad...).
+        :return: DataFrame con una fila por distribución y el VaR, el CVaR, la probabilidad de
+            pérdida y el valor final mediano.
+        """
+        filas = {}
+        for distribucion in DISTRIBUCIONES:
+            simulacion = cls(objetivo, n_simulaciones=n_simulaciones, horizonte=horizonte,
+                             semilla=semilla, guardar_graficos=False,
+                             distribucion=distribucion, **opciones)
+            filas[simulacion._nombre_distribucion] = {
+                "var_95": simulacion.var(0.95),
+                "cvar_95": simulacion.cvar(0.95),
+                "var_99": simulacion.var(0.99),
+                "cvar_99": simulacion.cvar(0.99),
+                "probabilidad_perdida": float(
+                    (simulacion.valores_finales < simulacion.valor_inicial).mean()),
+                "valor_final_mediano": float(simulacion.valores_finales.median()),
+            }
+        return pd.DataFrame(filas).T.rename_axis("distribucion")
+
+    @property
+    def _nombre_distribucion(self) -> str:
+        """Nombre legible de la distribución usada, para los gráficos y los informes."""
+        if self.distribucion == "t":
+            return f"t de Student (ν = {self.grados_libertad:.1f})"
+        if self.distribucion == "bootstrap":
+            return "Bootstrap histórico"
+        return "Normal"
 
     @property
     def valores_finales(self) -> pd.Series:
@@ -248,6 +364,8 @@ class MonteCarlo:
         finales = self.valores_finales
         return {
             "objetivo": self._nombre_objetivo,
+            "distribucion": self.distribucion,
+            "grados_libertad": self.grados_libertad,
             "n_simulaciones": self.n_simulaciones,
             "horizonte_sesiones": self.horizonte,
             "rentabilidad_anual_supuesta": self.rentabilidades.to_dict(),
@@ -352,7 +470,8 @@ class MonteCarlo:
         activo = f"{self._nombre_objetivo} · " if self.pesos is None else ""
         eje.set_title(
             f"Trayectorias simuladas · {activo}"
-            f"{self.n_simulaciones:,} simulaciones, {self.horizonte} sesiones",
+            f"{self.n_simulaciones:,} simulaciones, {self.horizonte} sesiones · "
+            f"{self._nombre_distribucion}",
             loc="left", color=COLORES["texto"], fontsize=12)
         eje.legend(loc="upper left", frameon=False, fontsize=9,
                    labelcolor=COLORES["texto_secundario"])
@@ -401,7 +520,8 @@ class MonteCarlo:
         eje.set_ylabel("Nº de simulaciones", color=COLORES["texto_secundario"])
         eje.set_title(
             f"Distribución del valor final · {self._nombre_objetivo} · "
-            f"{self.horizonte} sesiones", loc="left", color=COLORES["texto"], fontsize=12)
+            f"{self.horizonte} sesiones · {self._nombre_distribucion}", loc="left",
+            color=COLORES["texto"], fontsize=12)
         # Leyenda y estadísticos a la derecha, sobre la cola de la distribución, para no tapar
         # las líneas de los valores de referencia
         eje.legend(loc="upper right", frameon=False, fontsize=9,

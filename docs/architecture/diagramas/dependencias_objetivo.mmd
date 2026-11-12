@@ -17,8 +17,9 @@ flowchart TB
     end
 
     subgraph analisis["Análisis"]
+        analytics_hecho["analytics/<br/>benchmark · distribuciones"]
         returns["analytics/returns.py<br/>rendimientos"]
-        risk["analytics/risk.py<br/>Sharpe · drawdown · VaR · beta"]
+        risk["analytics/risk.py<br/>Sharpe · drawdown · VaR"]
     end
 
     subgraph sim["Simulación"]
@@ -26,6 +27,7 @@ flowchart TB
     end
 
     subgraph salida["Reportes"]
+        html["reporting/html.py<br/>informe en HTML"]
         markdown["reporting/markdown.py<br/>report()"]
         plots["reporting/plots.py<br/>plots_report()"]
     end
@@ -46,6 +48,10 @@ flowchart TB
     portfolio --> markdown
     portfolio --> plots
     risk --> returns
+    portfolio --> analytics_hecho
+    portfolio --> html
+    montecarlo --> analytics_hecho
+    providers --> analytics_hecho
     montecarlo --> risk
     markdown --> risk
     plots --> risk

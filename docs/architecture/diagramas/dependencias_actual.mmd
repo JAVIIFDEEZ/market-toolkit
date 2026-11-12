@@ -16,7 +16,15 @@ flowchart TB
     end
 
     subgraph sim["Simulación"]
-        montecarlo["simulation/montecarlo.py<br/>MonteCarlo"]
+        montecarlo["simulation/montecarlo.py<br/>MonteCarlo<br/>normal · t · bootstrap"]
+    end
+
+    subgraph analisis["Análisis"]
+        analytics["analytics/<br/>benchmark · distribuciones"]
+    end
+
+    subgraph salida["Reportes"]
+        reporting["reporting/html.py<br/>informe en HTML"]
     end
 
     subgraph prep["Preprocesado"]
@@ -62,11 +70,15 @@ flowchart TB
     portfolio --> cleaning
     montecarlo --> series
     series --> validation
+    portfolio --> analytics
+    portfolio --> reporting
+    montecarlo --> analytics
 
     %% Gráficos
     portfolio --> mpl
     informe --> mpl
     montecarlo --> mpl
+    reporting --> mpl
 
     %% Acoplamiento del preprocesado con una fuente de datos
     cleaning -- "tipos de cambio a USD" --> yf
@@ -76,5 +88,6 @@ flowchart TB
     modelos -.-> base
     sim -.-> base
     prep -.-> base
+    analisis -.-> base
 
-    linkStyle 12,13,14,15,23 stroke:#d03b3b,stroke-width:2px
+    linkStyle 12,13,14,15,27 stroke:#d03b3b,stroke-width:2px

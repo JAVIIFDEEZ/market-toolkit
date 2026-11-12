@@ -37,14 +37,14 @@ flowchart TB
 
     subgraph simulacion["4 · Simulación (simulation)"]
         direction LR
-        mc["MonteCarlo<br/>GBM + Cholesky"]
+        mc["MonteCarlo<br/>normal · t de Student · bootstrap"]
         res["percentiles · VaR · CVaR<br/>probabilidad de pérdida"]
     end
 
     subgraph salida["5 · Resultados"]
         direction LR
         resumen["resumen()"]
-        md["report()<br/>Markdown: métricas, diagnósticos,<br/>advertencias y fortalezas"]
+        md["report()<br/>Markdown o HTML: métricas, benchmark,<br/>diagnósticos y fortalezas"]
         plots["plots_report()<br/>6 gráficos"]
         graficos["graficar() /<br/>guardar_graficos()"]
     end
@@ -67,6 +67,8 @@ flowchart TB
     stats --> md
     stats --> plots
     ms -. "tipo libre de riesgo" .-> md
+    fs -. "índice de referencia" .-> md
+    mc -. "comparativa de distribuciones" .-> md
     stats --> mc
     fs -- "un activo" --> mc
     mc --> res --> graficos

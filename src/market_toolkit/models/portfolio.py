@@ -1,22 +1,42 @@
+from __future__ import annotations
+
 import hashlib
 import warnings
 from collections.abc import Mapping, Sequence
 from itertools import combinations_with_replacement
 from pathlib import Path
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from matplotlib.figure import Figure
 
+import market_toolkit.analytics as analytics
 import market_toolkit.models as models
 import market_toolkit.models.informe as informe
+import market_toolkit.reporting as reporting
 import market_toolkit.simulation.montecarlo as montecarlo
 from market_toolkit.config import DIAS_COTIZACION_ANUAL
 from market_toolkit.exceptions import DataValidationError, InsufficientDataError
-from market_toolkit.models.series import FinancialSeries, MacroSeries, SerieTemporal
 from market_toolkit.preprocessing import juntar_series
+
+if TYPE_CHECKING:
+    from market_toolkit.models.series import FinancialSeries
+
+
+def _porcentaje(valor: float | None) -> str:
+    """Formatea un tanto por uno como porcentaje para los informes."""
+    if valor is None or not np.isfinite(valor):
+        return "No disponible"
+    return f"{valor:.2%}"
+
+
+def _ratio(valor: float | None) -> str:
+    """Formatea un ratio con dos decimales para los informes."""
+    if valor is None or not np.isfinite(valor):
+        return "No disponible"
+    return f"{valor:.2f}"
 
 
 class Portfolio:
@@ -24,12 +44,6 @@ class Portfolio:
     Clase que modela una cartera de inversión.
     """
     TOLERANCIA_PESOS = 1e-6  # Margen para considerar que los pesos de una fecha suman 1
-    MACRO_ADMITIDOS = {
-        "DGS10",  # Bono EE.UU. 10 años, % diario
-        "DGS2",  # Bono EE.UU. 2 años, % diario
-        "IRLTLT01ESM156N",  # Bono España 10 años, % mensual
-        "IRLTLT01DEM156N"  # Bund 10 años, % mensual
-    }
 
     precio_activos: pd.DataFrame
     rendimiento: pd.Series
@@ -40,9 +54,8 @@ class Portfolio:
     desviacion_tipica: float
     rentabilidad_anualizada: float
     volatilidad_anualizada: float
-    _hay_macro: bool
 
-    def __init__(self, activos: Sequence[SerieTemporal], pesos: pd.DataFrame, *,
+    def __init__(self, activos: Sequence[FinancialSeries], pesos: pd.DataFrame, *,
                  alineacion_temporal: Literal["relleno", "eliminacion"] = "eliminacion"):
         """
         Inicializa un objeto de Portfolio.
@@ -58,20 +71,16 @@ class Portfolio:
         # Juntar activos
         self._series = list(activos)
         n_activos = len(activos)
-        activos_macro = [activo for activo in activos if isinstance(activo, MacroSeries)
-                               and activo.activo in self.MACRO_ADMITIDOS]
-        if len(activos_macro) > 0:
-            self._hay_macro = True
-        else:
-            self._hay_macro = False
-        activos_financiero = [activo for activo in activos if isinstance(activo, FinancialSeries)
-                               and activo.tipo_activo != models.TipoActivo.INDICE]
-        activos = activos_macro + activos_financiero
+        activos = list(
+            filter(
+                lambda activo: activo.tipo_activo != models.TipoActivo.INDICE,
+                activos
+            )
+        )
         if len(activos) != n_activos:
             raise DataValidationError(
-                f"Se han introducido activos no válidos en la cartera. "
-                f"Se permiten series financieras que no sean índices y "
-                f"las siguientes series macro: {', '.join(self.MACRO_ADMITIDOS)}"
+                "Se han proporcionado índices como activos. "
+                "Considere en su lugar introducir los ETFs referenciados a dichos índices."
             )
         self.precio_activos = juntar_series(activos, True, alineacion_temporal)
         # Validar pesos
@@ -148,7 +157,7 @@ class Portfolio:
         self._calcular_estadisticos()
         self._borrar_correlacion_si_cambia()
 
-    def _calcular_metadatos_activos(self, activos: Sequence[SerieTemporal]) -> pd.DataFrame:
+    def _calcular_metadatos_activos(self, activos: Sequence[FinancialSeries]) -> pd.DataFrame:
         """
         Recalcula los metadatos de los activos que forman la cartera tras la alineacion temporal.
         :param activos: Lista de series temporales de la cartera.
@@ -160,29 +169,16 @@ class Portfolio:
         rentabilidades = self.precio_activos.pct_change().dropna()
         medias = rentabilidades.mean()
         desviaciones = rentabilidades.std()
+        rentabilidades_anual = (1 + medias) ** DIAS_COTIZACION_ANUAL - 1
+        volatilidades_anual = desviaciones * np.sqrt(DIAS_COTIZACION_ANUAL)
         info.loc["moneda"] = "USD"
         info.loc["inicio"] = self.precio_activos.index[0].date()
         info.loc["fin"] = self.precio_activos.index[-1].date()
         info.loc["observaciones"] = len(self.precio_activos)
-        if self._hay_macro:
-            info.loc["media"] = medias
-            info.loc["desviacion_tipica"] = desviaciones
-            info = info.drop(
-                index=[
-                    "media_diaria",
-                    "desviacion_tipica_diaria",
-                    "rentabilidad_anualizada",
-                    "volatilidad_anualizada"
-                ],
-                errors="ignore"
-            )
-        else:
-            rentabilidades_anual = (1 + medias) ** DIAS_COTIZACION_ANUAL - 1
-            volatilidades_anual = desviaciones * np.sqrt(DIAS_COTIZACION_ANUAL)
-            info.loc["media_diaria"] = medias
-            info.loc["desviacion_tipica_diaria"] = desviaciones
-            info.loc["rentabilidad_anualizada"] = rentabilidades_anual
-            info.loc["volatilidad_anualizada"] = volatilidades_anual
+        info.loc["media_diaria"] = medias
+        info.loc["desviacion_tipica_diaria"] = desviaciones
+        info.loc["rentabilidad_anualizada"] = rentabilidades_anual
+        info.loc["volatilidad_anualizada"] = volatilidades_anual
         return info
 
     def _calcular_pesos_activos(
@@ -217,8 +213,6 @@ class Portfolio:
         factores = crecimiento.groupby(tramos).shift(1).fillna(1)
         # Evolución de los pesos, normalizados para que sumen 1
         pesos_evolucionados = cambios.reindex(rentabilidades.index).ffill() * factores
-
-
         return pesos_evolucionados.div(pesos_evolucionados.sum(axis=1), axis=0)
 
     @property
@@ -249,8 +243,8 @@ class Portfolio:
                 "calcular sus estadísticos.")
         self.rentabilidad_media = float(self.rendimiento.mean())
         self.desviacion_tipica = float(self.rendimiento.std())
-        self.rentabilidad_anualizada = (1 + self.rentabilidad_media) ** DIAS_COTIZACION_ANUAL - 1
-        self.volatilidad_anualizada = self.desviacion_tipica * np.sqrt(DIAS_COTIZACION_ANUAL)
+        self.rentabilidad_anualizada = analytics.rentabilidad_anualizada(self.rentabilidad_media)
+        self.volatilidad_anualizada = analytics.volatilidad_anualizada(self.desviacion_tipica)
 
     def correlacion(self, t: float, guardar: bool = True) -> pd.DataFrame:
         """
@@ -377,7 +371,8 @@ class Portfolio:
             loc="left", color=montecarlo.COLORES["texto"], fontsize=12)
 
     def plots_report(self, mostrar: bool = True, carpeta: str | Path | None = None,
-                     guardar: bool = True) -> dict[str, Figure]:
+                     guardar: bool = True,
+                     benchmark: FinancialSeries | None = None) -> dict[str, Figure]:
         """
         Genera el informe gráfico de la cartera en todo su periodo: evolución frente a sus
         activos, drawdown, evolución de los pesos, riesgo y rentabilidad, contribución de cada
@@ -386,6 +381,7 @@ class Portfolio:
         :param mostrar: `True` para mostrar los gráficos por pantalla.
         :param carpeta: Carpeta de destino. Por defecto, `models/graficos/informe/`.
         :param guardar: `True` para guardar los gráficos como PNG.
+        :param benchmark: Índice de referencia opcional, que se añade al gráfico de evolución.
         :return: Diccionario {nombre: figura} con los gráficos.
         """
         carpeta = Path(carpeta) if carpeta is not None else (
@@ -397,7 +393,7 @@ class Portfolio:
             return crear(figsize=tamano, facecolor=fondo, layout="constrained")
 
         inicio, fin = self.precio_activos.index[[0, -1]]
-        valor = informe.valor_cartera(self._rendimientos_cartera(), inicio)
+        valor = informe.valor_cartera(self.rendimiento, inicio)
         colores = informe.colores_activos(self.pesos)
         figuras = {nombre: nueva(tamano) for nombre, tamano in {
             "evolucion": (11, 6),
@@ -407,7 +403,12 @@ class Portfolio:
             "contribucion": (9, max(3.5, 0.5 * self.precio_activos.shape[1] + 1.5)),
             "correlacion": self._tamano_correlacion(self.precio_activos.shape[1]),
         }.items()}
-        informe.dibujar_evolucion(figuras["evolucion"], self.precio_activos, valor, colores)
+        base_benchmark = None
+        if benchmark is not None:
+            precios_benchmark = benchmark.serie_temporal.loc[inicio:fin]
+            base_benchmark = analytics.base_100(precios_benchmark).rename(benchmark.nombre)
+        informe.dibujar_evolucion(figuras["evolucion"], self.precio_activos, valor, colores,
+                                  benchmark=base_benchmark)
         informe.dibujar_drawdown(figuras["drawdown"], valor)
         informe.dibujar_pesos(figuras["pesos"], self.pesos, colores,
                               self._sesiones_cambio[self._sesiones_cambio > inicio])
@@ -469,11 +470,16 @@ class Portfolio:
             confianza_es: float = 0.95,
             max_concentracion: float = 0.50,
             max_correlacion: float = 0.80,
-            min_historial: int = 252,
+            max_historial: int = 252,
             min_activos_efectivos: float = 3.0,
             max_correlacion_diversificada: float = 0.30,
             min_sharpe: float = 1.0,
             min_cobertura: float = 0.90,
+            benchmark: FinancialSeries | None = None,
+            incluir_montecarlo: bool = False,
+            simulaciones_montecarlo: int = 5000,
+            formato: Literal["markdown", "html"] = "markdown",
+            incluir_graficos: bool = True,
     ) -> str:
         """Devuelve un informe Markdown de rentabilidad, riesgo y diversificación.
 
@@ -488,12 +494,22 @@ class Portfolio:
         :param confianza_es: Nivel de confianza del Expected Shortfall histórico.
         :param max_concentracion: Peso máximo aceptado para un activo.
         :param max_correlacion: Correlación media máxima antes de emitir advertencia.
-        :param min_historial: Número mínimo de rendimientos diarios esperados.
+        :param max_historial: Número mínimo de rendimientos diarios esperados.
         :param min_activos_efectivos: Número efectivo mínimo para considerar diversificada.
         :param max_correlacion_diversificada: Correlación máxima para destacar diversificación.
         :param min_sharpe: Sharpe mínimo para destacar esta fortaleza.
         :param min_cobertura: Cobertura mínima de datos por activo durante el periodo.
-        :return: Informe Markdown en español.
+        :param benchmark: Índice de referencia opcional (por ejemplo, el S&P 500 o su ETF). Añade
+            una sección con beta, alfa de Jensen, tracking error, information ratio y correlación.
+        :param incluir_montecarlo: `True` para añadir una comparación del riesgo a un año con
+            Monte Carlo usando las distribuciones normal, t de Student y bootstrap histórico.
+        :param simulaciones_montecarlo: Número de trayectorias de cada simulación de la sección
+            de Monte Carlo.
+        :param formato: `"markdown"` (por defecto) o `"html"` para una página autocontenida con
+            el mismo contenido y mejor formato, lista para abrir en el navegador.
+        :param incluir_graficos: Solo con `formato="html"`. `True` para incrustar en la página
+            los seis gráficos de `plots_report()`.
+        :return: Informe en español, en Markdown o en HTML según `formato`.
         """
         parametros_numericos = {
             "tasa_libre_riesgo": tasa_libre_riesgo,
@@ -512,14 +528,18 @@ class Portfolio:
                     or not isinstance(valor, (int, float, np.integer, np.floating))
                     or not np.isfinite(valor)):
                 raise ValueError(f"`{clave}` debe ser un número finito.")
-        if (isinstance(min_historial, bool)
-                or not isinstance(min_historial, (int, np.integer))):
-            raise ValueError("`min_historial` debe ser un entero positivo.")
-        min_historial = int(min_historial)
-        if min_historial < 1:
-            raise ValueError("`min_historial` debe ser un entero positivo.")
+        if (isinstance(max_historial, bool)
+                or not isinstance(max_historial, (int, np.integer))):
+            raise ValueError("`max_historial` debe ser un entero positivo.")
+        max_historial = int(max_historial)
+        if max_historial < 1:
+            raise ValueError("`max_historial` debe ser un entero positivo.")
         if not 0 < confianza_es < 1:
             raise ValueError("`confianza_es` debe estar entre 0 y 1, sin incluirlos.")
+        if formato not in ("markdown", "html"):
+            raise ValueError(f"Formato no válido: {formato}. Usa 'markdown' o 'html'.")
+        if benchmark is not None and not isinstance(benchmark, models.FinancialSeries):
+            raise ValueError("`benchmark` debe ser una FinancialSeries.")
         if not 0 <= max_concentracion <= 1:
             raise ValueError("`max_concentracion` debe estar entre 0 y 1.")
         if not -1 <= max_correlacion <= 1 or not -1 <= max_correlacion_diversificada <= 1:
@@ -544,15 +564,13 @@ class Portfolio:
         else:
             cagr = None
         exceso_diario = rendimientos - tasa_libre_riesgo / DIAS_COTIZACION_ANUAL
-        sharpe = float(
-            exceso_diario.mean() / self.desviacion_tipica * np.sqrt(DIAS_COTIZACION_ANUAL)
-        )
+        sharpe = analytics.ratio_sharpe(rendimientos, tasa_libre_riesgo)
         desviacion_bajista = float(np.sqrt(np.square(exceso_diario.clip(upper=0)).mean()))
         sortino = (
             float(exceso_diario.mean() / desviacion_bajista * np.sqrt(DIAS_COTIZACION_ANUAL))
             if desviacion_bajista > 0 else None
         )
-        drawdown_maximo = -(crecimiento / crecimiento.cummax() - 1).min()
+        drawdown_maximo = analytics.drawdown_maximo(crecimiento)
         cuantil_rendimiento = rendimientos.quantile(1 - confianza_es)
         cola_perdedora = rendimientos[rendimientos <= cuantil_rendimiento]
         expected_shortfall = float(-cola_perdedora.mean())
@@ -631,10 +649,10 @@ class Portfolio:
             advertencias.append(
                 f"Correlación elevada entre **{activo_a}** y **{activo_b}**: {correlacion:.2f}."
             )
-        if numero_sesiones < min_historial:
+        if numero_sesiones < max_historial:
             advertencias.append(
                 f"Historial corto: {numero_sesiones} sesiones con rendimientos; "
-                f"se requieren {min_historial} para alcanzar el umbral configurado."
+                f"se requieren {max_historial} para alcanzar el umbral configurado."
             )
         for activo, cobertura in coberturas.items():
             if cobertura < min_cobertura:
@@ -659,12 +677,6 @@ class Portfolio:
                 f"Sharpe elevado respecto al umbral ({sharpe:.2f} ≥ {min_sharpe:.2f})."
             )
 
-        def porcentaje(valor: float | None) -> str:
-            return "No disponible" if valor is None else f"{valor:.2%}"
-
-        def ratio(valor: float | None) -> str:
-            return "No disponible" if valor is None else f"{valor:.2f}"
-
         lineas = [
             "# Informe de cartera",
             "",
@@ -678,7 +690,8 @@ class Portfolio:
         ]
         lineas.extend(
                 f"  - {activo}: {peso:.2%}"
-                for activo, peso in self.pesos.loc[self._ultimo_rebalanceo].items()
+                # Si el rebalanceo cae en un día sin sesión, se aplica en la siguiente sesión
+                for activo, peso in self.pesos.loc[self._sesiones_cambio[-1]].items()
         )
         lineas.extend([
             f"- **Valor final de 100 iniciales:** {valor_final * 100:.2f}",
@@ -699,7 +712,7 @@ class Portfolio:
             "## Rentabilidad",
             "",
             f"- **Rentabilidad acumulada:** {rentabilidad_acumulada:.2%}",
-            f"- **CAGR:** {porcentaje(cagr)}" + (
+            f"- **CAGR:** {_porcentaje(cagr)}" + (
                 " (no disponible porque el valor final no es positivo)" if cagr is None else ""
             ),
             f"- **Rentabilidad media diaria:** {rendimientos.mean():.3%}",
@@ -714,17 +727,17 @@ class Portfolio:
             "",
             f"- **Volatilidad anualizada:** {self.volatilidad_anualizada:.2%}",
             f"- **Drawdown máximo:** {drawdown_maximo:.2%}",
-            f"- **Sharpe anualizado:** {ratio(sharpe)}",
-            f"- **Sortino anualizado:** {ratio(sortino)}",
+            f"- **Sharpe anualizado:** {_ratio(sharpe)}",
+            f"- **Sortino anualizado:** {_ratio(sortino)}",
             f"- **Expected Shortfall ({confianza_es:.0%}, histórico diario):** "
             f"{expected_shortfall:.2%}",
             "",
             "## Diversificación y concentración",
             "",
-            f"- **Índice HHI:** {ratio(hhi)}",
-            f"- **Número efectivo de activos:** {ratio(activos_efectivos)}",
+            f"- **Índice HHI:** {_ratio(hhi)}",
+            f"- **Número efectivo de activos:** {_ratio(activos_efectivos)}",
             f"- **Mayor exposición absoluta:** {pesos_actuales.max():.2%}",
-            f"- **Correlación media:** {ratio(correlacion_media)}",
+            f"- **Correlación media:** {_ratio(correlacion_media)}",
             "",
             "### Matriz de correlaciones diarias",
             "",
@@ -735,6 +748,11 @@ class Portfolio:
             valores = ["No disponible" if pd.isna(valor) else f"{valor:.2f}"
                        for valor in fila]
             lineas.append(f"| {activo} | " + " | ".join(valores) + " |")
+        if benchmark is not None:
+            lineas.extend(self._seccion_benchmark(benchmark, tasa_libre_riesgo, advertencias,
+                                                  fortalezas))
+        if incluir_montecarlo:
+            lineas.extend(self._seccion_montecarlo(simulaciones_montecarlo))
         lineas.extend(["", "## Diagnósticos y advertencias", ""])
         lineas.extend(
             [f"- {advertencia}" for advertencia in advertencias]
@@ -746,10 +764,83 @@ class Portfolio:
             if fortalezas else ["No se han detectado fortalezas según los umbrales configurados."]
         )
         informe = "\n".join(lineas)
+        if formato == "html":
+            figuras = (self.plots_report(mostrar=False, guardar=False, benchmark=benchmark)
+                       if incluir_graficos else None)
+            informe = reporting.informe_html(informe, figuras)
         if ruta is not None:
             with open(ruta, "w", encoding="utf-8", newline="\n") as archivo:
                 archivo.write(informe)
         return informe
+
+    def _seccion_benchmark(self, benchmark: FinancialSeries, tasa_libre_riesgo: float,
+                           advertencias: list[str], fortalezas: list[str]) -> list[str]:
+        """
+        Líneas Markdown de la comparación con el índice de referencia. Añade, además, las
+        advertencias y fortalezas que se deriven de ella.
+        :param benchmark: Índice de referencia.
+        :param tasa_libre_riesgo: Tasa anual en tanto por uno, para el alfa.
+        :param advertencias: Lista de advertencias del informe, que se amplía.
+        :param fortalezas: Lista de fortalezas del informe, que se amplía.
+        :return: Líneas de la sección.
+        """
+        metricas = analytics.metricas_benchmark(self.rendimiento, benchmark.rendimientos(),
+                                                tasa_libre_riesgo)
+        if benchmark.moneda not in (None, "USD"):
+            advertencias.append(
+                f"El índice de referencia **{benchmark.activo}** cotiza en {benchmark.moneda} y "
+                "la cartera en USD: la comparación incluye el efecto de la divisa.")
+        diferencia = metricas["rentabilidad_cartera"] - metricas["rentabilidad_benchmark"]
+        if diferencia < 0:
+            advertencias.append(
+                f"La cartera ha rendido {-diferencia:.2%} menos que **{benchmark.activo}** en "
+                "el periodo común.")
+        elif metricas["alfa"] > 0:
+            fortalezas.append(
+                f"La cartera supera a **{benchmark.activo}** en {diferencia:.2%} con un alfa "
+                f"anual positivo ({metricas['alfa']:.2%}).")
+
+        return [
+            "",
+            f"## Comparación con el índice de referencia ({benchmark.activo})",
+            "",
+            f"- **Sesiones comunes:** {metricas['sesiones_comunes']}",
+            f"- **Rentabilidad acumulada de la cartera:** {metricas['rentabilidad_cartera']:.2%}",
+            f"- **Rentabilidad acumulada del índice:** {metricas['rentabilidad_benchmark']:.2%}",
+            f"- **Beta:** {_ratio(metricas['beta'])}",
+            f"- **Alfa de Jensen anual:** {metricas['alfa']:.2%}",
+            f"- **Tracking error anual:** {metricas['tracking_error']:.2%}",
+            f"- **Information ratio:** {_ratio(metricas['information_ratio'])}",
+            f"- **Correlación con el índice:** {_ratio(metricas['correlacion'])}",
+        ]
+
+    def _seccion_montecarlo(self, n_simulaciones: int) -> list[str]:
+        """
+        Líneas Markdown con el riesgo a un año según Monte Carlo con tres distribuciones.
+        :param n_simulaciones: Número de trayectorias de cada simulación.
+        :return: Líneas de la sección.
+        """
+        comparacion = montecarlo.MonteCarlo.comparar_distribuciones(
+            self, n_simulaciones=n_simulaciones)
+        lineas = [
+            "",
+            "## Simulación de Monte Carlo (1 año)",
+            "",
+            f"{n_simulaciones} trayectorias por distribución, con los pesos actuales y sin "
+            "rebalanceo. La t de Student y el bootstrap histórico reproducen mejor las caídas "
+            "extremas que la normal.",
+            "",
+            "| Distribución | VaR 95 % | CVaR 95 % | VaR 99 % | CVaR 99 % | "
+            "Prob. de pérdida | Valor final mediano |",
+            "| --- | ---: | ---: | ---: | ---: | ---: | ---: |",
+        ]
+        for distribucion, fila in comparacion.iterrows():
+            lineas.append(
+                f"| {distribucion} | {fila['var_95']:.2%} | {fila['cvar_95']:.2%} | "
+                f"{fila['var_99']:.2%} | {fila['cvar_99']:.2%} | "
+                f"{fila['probabilidad_perdida']:.2%} | {fila['valor_final_mediano']:.2f} |"
+            )
+        return lineas
 
     def simulacion_monte_carlo(self, n_simulaciones: int = 1000,
              horizonte: int = DIAS_COTIZACION_ANUAL,
@@ -758,7 +849,9 @@ class Portfolio:
              valor_inicial: float | int | None = None,
              rebalanceo: bool = False,
              semilla: int | None = None,
-             guardar_graficos: bool = True) -> montecarlo.MonteCarlo:
+             guardar_graficos: bool = True,
+             distribucion: montecarlo.Distribucion = "normal",
+             grados_libertad: float | None = None) -> montecarlo.MonteCarlo:
         """
         Realiza el algoritmo de simulación de montecarlo sobre la cartera.
         :param n_simulaciones: Número de trayectorias (iteraciones) a simular.
@@ -774,7 +867,15 @@ class Portfolio:
             `True` para mantener los pesos constantes cada día (rebalanceo diario).
         :param semilla: Semilla del generador aleatorio, para obtener resultados reproducibles.
         :param guardar_graficos: `True` para borrar los gráficos de la simulación anterior y
+<<<<<<< HEAD
             guardar los de esta en `models/graficos/` (trayectorias.png y distribucion.png).
+=======
+            guardar los de esta en `simulation/graficos/` (trayectorias.png y distribucion.png).
+        :param distribucion: Distribución de los choques diarios: `"normal"` (por defecto),
+            `"t"` (t de Student, colas gruesas) o `"bootstrap"` (días reales del histórico).
+        :param grados_libertad: Solo con `distribucion="t"`. Si es `None` se estiman de la
+            curtosis histórica.
+>>>>>>> origin/main
         :return: El objeto MonteCarlo con los resultados de la simulación.
         """
         sim = montecarlo.MonteCarlo(
@@ -786,7 +887,9 @@ class Portfolio:
             valor_inicial=valor_inicial,
             rebalanceo=rebalanceo,
             semilla=semilla,
-            guardar_graficos=guardar_graficos
+            guardar_graficos=guardar_graficos,
+            distribucion=distribucion,
+            grados_libertad=grados_libertad,
         )
         sim.graficar()
         return sim
