@@ -495,20 +495,29 @@ ignora.
 Se descargan con `MacroProvider`, que usa la API de FRED y, para datos históricos tal y como se
 publicaron (sin revisiones posteriores), ALFRED.
 
-Las series se indican con su ID de FRED (por ejemplo `DGS10`) o con un alias de
-`MacroProvider.SERIES`:
+Las series se indican con su ID de FRED (por ejemplo `DGS10`) o con uno de los alias
+preestablecidos en `MacroProvider.SERIES`. Los alias no distinguen mayúsculas y minúsculas, y
+cualquier otro ID de FRED también funciona aunque no esté en la lista.
 
-| Alias | ID de FRED | Serie |
-|---|---|---|
-| `us10y` / `us2y` | `DGS10` / `DGS2` | Bono EE.UU. 10 / 2 años (%) |
-| `us10y_2y` | `T10Y2Y` | Spread 10Y-2Y EE.UU. |
-| `ipc_eurozona` | `CP0000EZ19M086NEST` | IPC armonizado de la Eurozona |
-| `pib_espana` | `CLVMNACSCAB1GQES` | PIB real de España (trimestral) |
-| `pib_eeuu` | `GDPC1` | PIB real de EE.UU. (trimestral) |
-| `es10y` / `de10y` | `IRLTLT01ESM156N` / `IRLTLT01DEM156N` | Bono España / Alemania 10 años |
-| `bce_depo` / `fed_funds` | `ECBDFR` / `DFF` | Tipo de depósito del BCE / Fed Funds |
-| `cpi_eeuu` / `paro_eeuu` | `CPIAUCSL` / `UNRATE` | IPC / paro de EE.UU. |
-| `eurusd`, `vix`, `wti`, `hy_spread`, `breakeven10y` | ... | Ver `MacroProvider.SERIES` |
+| Alias | ID de FRED | Serie | Unidad | Frecuencia |
+|---|---|---|---|---|
+| `us10y` | `DGS10` | Bono de EE.UU. a 10 años | % | Diaria |
+| `us2y` | `DGS2` | Bono de EE.UU. a 2 años | % | Diaria |
+| `us10y_2y` | `T10Y2Y` | Diferencial 10 años - 2 años de EE.UU. | % | Diaria |
+| `es10y` | `IRLTLT01ESM156N` | Bono de España a 10 años | % | Mensual |
+| `de10y` | `IRLTLT01DEM156N` | Bund alemán a 10 años | % | Mensual |
+| `breakeven10y` | `T10YIE` | Inflación implícita a 10 años de EE.UU. | % | Diaria |
+| `hy_spread` | `BAMLH0A0HYM2` | Diferencial de los bonos High Yield de EE.UU. | % | Diaria |
+| `bce_depo` | `ECBDFR` | Facilidad de depósito del BCE | % | Diaria, 7 días a la semana |
+| `fed_funds` | `DFF` | Tipo efectivo de los Fed Funds | % | Diaria, 7 días a la semana |
+| `ipc_eurozona` | `CP0000EZ19M086NEST` | IPC armonizado de la Eurozona | Índice 2025 = 100 | Mensual |
+| `cpi_eeuu` | `CPIAUCSL` | IPC de EE.UU. | Índice 1982-1984 = 100 | Mensual |
+| `pib_espana` | `CLVMNACSCAB1GQES` | PIB real de España | Millones de € encadenados de 2010 | Trimestral |
+| `pib_eeuu` | `GDPC1` | PIB real de EE.UU. | Miles de millones de $ encadenados de 2017 | Trimestral |
+| `paro_eeuu` | `UNRATE` | Tasa de paro de EE.UU. | % | Mensual |
+| `eurusd` | `DEXUSEU` | Tipo de cambio euro-dólar | Dólares por euro | Diaria |
+| `wti` | `DCOILWTICO` | Petróleo WTI | $ por barril | Diaria |
+| `vix` | `VIXCLS` | Índice de volatilidad VIX | Índice | Diaria |
 
 #### Crear el proveedor
 
@@ -766,7 +775,7 @@ volatilidad_anualizada     0.325491    0.328106    0.281661
 
 `correlacion(t=x)` calcula la correlación entre los rendimientos diarios en USD de los activos
 durante los últimos `x` años de la cartera (admite fracciones). Devuelve la matriz y la guarda
-como imagen en `simulation/graficos/correlacion.png`, con escala de -1 a 1.
+como imagen en `models/graficos/correlacion.png`, con escala de -1 a 1.
 
 ```python
 cartera.correlacion(t=0.5)      # Últimos 6 meses
@@ -890,7 +899,7 @@ Los umbrales de las advertencias se pueden cambiar:
 ### Informe gráfico
 
 `plots_report()` genera seis gráficos de la cartera sobre todo su periodo, en USD. Los muestra por
-pantalla, los guarda como PNG en `simulation/graficos/informe/` y devuelve un diccionario
+pantalla, los guarda como PNG en `models/graficos/informe/` y devuelve un diccionario
 `{nombre: figura}`:
 
 ```python
@@ -903,7 +912,7 @@ cartera.plots_report(carpeta="resultados/cartera")   # Guarda en otra carpeta
 | Parámetro | Qué hace | Por defecto |
 |---|---|---|
 | `mostrar` | Muestra los gráficos por pantalla | `True` |
-| `carpeta` | Carpeta de destino de los PNG | `simulation/graficos/informe/` |
+| `carpeta` | Carpeta de destino de los PNG | `models/graficos/informe/` |
 | `guardar` | Guarda los gráficos como PNG | `True` |
 
 La ruta `models/graficos/informe/` solo se usa si no se indica `carpeta`. Por ejemplo, la
@@ -1095,7 +1104,7 @@ por debajo del valor inicial), el VaR y el CVaR al 95 %.
 ### Gráficos
 
 Al crear el objeto se sustituyen los dos gráficos de la simulación anterior en
-`simulation/graficos/` (con `mc.graficar()` también se muestran por pantalla):
+`models/graficos/` (con `mc.graficar()` también se muestran por pantalla):
 
 - `trayectorias.png`: una muestra de caminos, las bandas de percentiles 5-95 y 25-75, la media y
   la mediana.

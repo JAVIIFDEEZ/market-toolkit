@@ -488,7 +488,7 @@ class MacroProvider(Provider):
         "us10y": "DGS10",  # Bono EE.UU. 10 años, % diario
         "us2y": "DGS2",  # Bono EE.UU. 2 años, % diario
         "us10y_2y": "T10Y2Y",  # Spread 10Y-2Y EE.UU., p.p. diario
-        "ipc_eurozona": "CP0000EZ19M086NEST",  # HICP Eurozona, índice 2015=100 mensual
+        "ipc_eurozona": "CP0000EZ19M086NEST",  # HICP Eurozona, índice 2025=100 mensual
         "pib_espana": "CLVMNACSCAB1GQES",  # PIB real España, M€ encadenados trimestral
         "es10y": "IRLTLT01ESM156N",  # Bono España 10 años, % mensual
         "de10y": "IRLTLT01DEM156N",  # Bund 10 años, % mensual
